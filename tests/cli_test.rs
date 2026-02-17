@@ -1,0 +1,96 @@
+mod fixtures;
+
+use predicates::prelude::*;
+
+#[test]
+fn display_top_level_help() {
+    fixtures::exapump()
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "The simplest path from file to Exasol table",
+        ))
+        .stdout(predicate::str::contains("upload"))
+        .stdout(predicate::str::contains("--help"))
+        .stdout(predicate::str::contains("--version"));
+}
+
+#[test]
+fn display_version() {
+    fixtures::exapump()
+        .arg("--version")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("exapump"))
+        .stdout(predicate::str::contains("0.1.0"));
+}
+
+#[test]
+fn no_arguments_shows_help() {
+    fixtures::exapump()
+        .assert()
+        .code(2)
+        .stdout(predicate::str::contains("upload"));
+}
+
+#[test]
+fn upload_help_shows_all_arguments() {
+    fixtures::exapump()
+        .args(["upload", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("<FILES>"))
+        .stdout(predicate::str::contains("--table"))
+        .stdout(predicate::str::contains("--dsn"))
+        .stdout(predicate::str::contains("--dry-run"));
+}
+
+#[test]
+fn missing_required_arguments() {
+    fixtures::exapump()
+        .arg("upload")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("required"));
+}
+
+#[test]
+fn dsn_from_environment_variable() {
+    let dir = tempfile::tempdir().unwrap();
+    let parquet_path = fixtures::create_test_parquet(dir.path());
+
+    fixtures::exapump()
+        .env("EXAPUMP_DSN", "exasol://env:pwd@host:8563")
+        .args([
+            "upload",
+            parquet_path.to_str().unwrap(),
+            "--table",
+            "my_schema.my_table",
+            "--dry-run",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("CREATE TABLE"));
+}
+
+#[test]
+fn dsn_flag_overrides_environment_variable() {
+    let dir = tempfile::tempdir().unwrap();
+    let parquet_path = fixtures::create_test_parquet(dir.path());
+
+    fixtures::exapump()
+        .env("EXAPUMP_DSN", "exasol://env:pwd@host:8563")
+        .args([
+            "upload",
+            parquet_path.to_str().unwrap(),
+            "--table",
+            "my_schema.my_table",
+            "--dsn",
+            "exasol://flag:pwd@host:8563",
+            "--dry-run",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("CREATE TABLE"));
+}
