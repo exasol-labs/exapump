@@ -1,0 +1,8 @@
+{
+  "env": {
+    "DISABLE_TELEMETRY": "1"
+  },
+  "preferences": {
+    "enableGitCoAuthoredBy": false
+  }
+}
