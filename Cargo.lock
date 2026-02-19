@@ -712,7 +712,7 @@ dependencies = [
 
 [[package]]
 name = "exapump"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "arrow",
@@ -721,15 +721,14 @@ dependencies = [
  "exarrow-rs",
  "parquet",
  "predicates",
+ "regex",
  "tempfile",
  "tokio",
 ]
 
 [[package]]
 name = "exarrow-rs"
-version = "0.5.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2b0d15ac8a5adeacfdbfa94e34647bd5628dc0ca608319fda2c4a5260e34ea47"
+version = "0.6.0"
 dependencies = [
  "arrow",
  "async-trait",

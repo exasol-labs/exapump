@@ -31,4 +31,24 @@ pub struct UploadArgs {
     /// Preview inferred schema without loading data
     #[arg(long)]
     pub dry_run: bool,
+
+    /// CSV field delimiter
+    #[arg(long, default_value_t = ',')]
+    pub delimiter: char,
+
+    /// Treat the first row as data, not a header
+    #[arg(long)]
+    pub no_header: bool,
+
+    /// CSV quoting character
+    #[arg(long, default_value_t = '"')]
+    pub quote: char,
+
+    /// CSV escape character
+    #[arg(long)]
+    pub escape: Option<char>,
+
+    /// String to interpret as NULL
+    #[arg(long, default_value = "")]
+    pub null_value: String,
 }

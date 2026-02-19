@@ -43,7 +43,27 @@ fn upload_help_shows_all_arguments() {
         .stdout(predicate::str::contains("<FILES>"))
         .stdout(predicate::str::contains("--table"))
         .stdout(predicate::str::contains("--dsn"))
-        .stdout(predicate::str::contains("--dry-run"));
+        .stdout(predicate::str::contains("--dry-run"))
+        .stdout(predicate::str::contains("--delimiter"))
+        .stdout(predicate::str::contains("--no-header"))
+        .stdout(predicate::str::contains("--quote"))
+        .stdout(predicate::str::contains("--escape"))
+        .stdout(predicate::str::contains("--null-value"));
+}
+
+#[test]
+fn csv_flags_shown_with_defaults_in_help() {
+    fixtures::exapump()
+        .args(["upload", "--help"])
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("--delimiter").and(predicate::str::contains("[default: ,]")),
+        )
+        .stdout(predicate::str::contains("--quote").and(predicate::str::contains("[default: \"]")))
+        .stdout(
+            predicate::str::contains("--null-value").and(predicate::str::contains("[default: ]")),
+        );
 }
 
 #[test]

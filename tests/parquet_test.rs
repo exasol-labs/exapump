@@ -45,13 +45,13 @@ fn file_not_found_error() {
 #[test]
 fn unsupported_file_extension() {
     let dir = tempfile::tempdir().unwrap();
-    let csv_path = dir.path().join("data.csv");
-    std::fs::write(&csv_path, "a,b\n1,2").unwrap();
+    let json_path = dir.path().join("data.json");
+    std::fs::write(&json_path, r#"{"a":1}"#).unwrap();
 
     fixtures::exapump()
         .args([
             "upload",
-            csv_path.to_str().unwrap(),
+            json_path.to_str().unwrap(),
             "--table",
             "test_schema.test_table",
             "--dsn",
@@ -60,7 +60,7 @@ fn unsupported_file_extension() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("not supported"))
-        .stderr(predicate::str::contains(".parquet"));
+        .stderr(predicate::str::contains(".parquet, .csv"));
 }
 
 #[test]
@@ -83,23 +83,11 @@ fn connection_failure() {
 }
 
 #[tokio::test]
-#[ignore]
-async fn upload_to_existing_table() {
-    let schema_name = format!(
-        "EXAPUMP_TEST_{}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_millis()
-    );
+async fn exasol_parquet_import_to_existing_table() {
+    fixtures::require_exasol();
 
-    let driver = exarrow_rs::Driver::new();
-    let db = driver.open(fixtures::DOCKER_DSN).unwrap();
-    let mut conn = db.connect().await.unwrap();
+    let (mut conn, schema_name) = fixtures::setup_exasol_schema("EXAPUMP_PQ").await;
 
-    conn.execute_update(&format!("CREATE SCHEMA IF NOT EXISTS {schema_name}"))
-        .await
-        .unwrap();
     conn.execute_update(&format!(
         "CREATE TABLE {schema_name}.UPLOAD_EXISTING (\
             ID DECIMAL(18,0), \
@@ -114,7 +102,7 @@ async fn upload_to_existing_table() {
     let parquet_path = fixtures::create_test_parquet(dir.path());
 
     fixtures::exapump()
-        .timeout(std::time::Duration::from_secs(30))
+        .timeout(std::time::Duration::from_secs(60))
         .args([
             "upload",
             parquet_path.to_str().unwrap(),
@@ -134,23 +122,10 @@ async fn upload_to_existing_table() {
 }
 
 #[tokio::test]
-#[ignore]
-async fn upload_with_auto_table_creation() {
-    let schema_name = format!(
-        "EXAPUMP_TEST_{}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_millis()
-    );
+async fn exasol_parquet_import_with_auto_table_creation() {
+    fixtures::require_exasol();
 
-    let driver = exarrow_rs::Driver::new();
-    let db = driver.open(fixtures::DOCKER_DSN).unwrap();
-    let mut conn = db.connect().await.unwrap();
-
-    conn.execute_update(&format!("CREATE SCHEMA IF NOT EXISTS {schema_name}"))
-        .await
-        .unwrap();
+    let (mut conn, schema_name) = fixtures::setup_exasol_schema("EXAPUMP_PQ").await;
 
     let dir = tempfile::tempdir().unwrap();
     let parquet_path = fixtures::create_test_parquet(dir.path());
@@ -158,7 +133,7 @@ async fn upload_with_auto_table_creation() {
     let table_name = format!("{schema_name}.AUTO_CREATED");
 
     fixtures::exapump()
-        .timeout(std::time::Duration::from_secs(30))
+        .timeout(std::time::Duration::from_secs(60))
         .args([
             "upload",
             parquet_path.to_str().unwrap(),
