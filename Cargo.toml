@@ -3,6 +3,8 @@ name = "exapump"
 version = "0.2.0"
 edition = "2021"
 description = "The simplest path from file to Exasol table — a single-binary CLI for CSV and Parquet ingest."
+license = "MIT"
+authors = ["Exasol Labs <labs@exasol.com>"]
 
 [[bin]]
 name = "exapump"

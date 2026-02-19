@@ -1,0 +1,119 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  EXASOL_HOST: localhost
+  EXASOL_PORT: 8563
+  EXASOL_USER: sys
+  EXASOL_PASSWORD: exasol
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Build
+        run: cargo build --verbose
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+  licenses:
+    name: License Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@cargo-deny
+
+      - name: Check licenses
+        run: cargo deny check licenses
+
+  tests:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Start Exasol container
+        run: |
+          docker run -d \
+            --name exasol-test \
+            --privileged \
+            --shm-size=1g \
+            -p 8563:8563 \
+            exasol/docker-db:2025.2.0
+
+      - name: Wait for Exasol to be ready
+        run: |
+          echo "Waiting for Exasol on port 8563..."
+          for i in $(seq 1 120); do
+            if bash -c "echo > /dev/tcp/localhost/8563" 2>/dev/null; then
+              echo "Exasol is ready after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Exasol failed to start within 120s"
+          exit 1
+
+      - name: Run tests
+        run: cargo test --verbose
+
+      - name: Stop Exasol container
+        if: always()
+        run: |
+          docker stop exasol-test || true
+          docker rm exasol-test || true
