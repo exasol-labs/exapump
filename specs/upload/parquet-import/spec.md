@@ -44,8 +44,8 @@ exapump connects to Exasol via exarrow-rs using the DSN provided by `--dsn` or `
 
 ### Scenario: Unsupported file extension
 
-* *GIVEN* a file exists with an unrecognized extension (not `.parquet`)
-* *WHEN* the user runs `exapump upload data.csv --table schema.table --dsn <dsn>`
+* *GIVEN* a file exists with an unrecognized extension (not `.parquet` or `.csv`)
+* *WHEN* the user runs `exapump upload data.json --table schema.table --dsn <dsn>`
 * *THEN* the command MUST exit with a non-zero code
 * *AND* stderr MUST indicate that the file format is not supported
 * *AND* stderr SHOULD list the supported formats
