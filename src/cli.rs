@@ -14,6 +14,8 @@ pub enum Commands {
     Upload(UploadArgs),
     /// Execute SQL statements against Exasol
     Sql(SqlArgs),
+    /// Export an Exasol table or query result to a file
+    Export(ExportArgs),
 }
 
 #[derive(clap::Args)]
@@ -33,6 +35,11 @@ pub struct SqlArgs {
 pub enum OutputFormat {
     Csv,
     Json,
+}
+
+#[derive(clap::ValueEnum, Clone, Debug)]
+pub enum ExportFormat {
+    Csv,
 }
 
 #[derive(clap::Args)]
@@ -69,6 +76,54 @@ pub struct UploadArgs {
     pub escape: Option<char>,
 
     /// String to interpret as NULL
+    #[arg(long, default_value = "")]
+    pub null_value: String,
+}
+
+#[derive(clap::Args)]
+pub struct ExportArgs {
+    /// Table to export (e.g., schema.table)
+    #[arg(
+        short,
+        long,
+        conflicts_with = "query",
+        required_unless_present = "query"
+    )]
+    pub table: Option<String>,
+
+    /// SQL query to export results from
+    #[arg(
+        short,
+        long,
+        conflicts_with = "table",
+        required_unless_present = "table"
+    )]
+    pub query: Option<String>,
+
+    /// Output file path
+    #[arg(short, long)]
+    pub output: String,
+
+    /// Export format
+    #[arg(short, long, value_enum)]
+    pub format: ExportFormat,
+
+    #[command(flatten)]
+    pub conn: crate::connection::ConnectionArgs,
+
+    /// CSV field delimiter
+    #[arg(long, default_value_t = ',')]
+    pub delimiter: char,
+
+    /// CSV quoting character
+    #[arg(long, default_value_t = '"')]
+    pub quote: char,
+
+    /// Exclude header row from output
+    #[arg(long)]
+    pub no_header: bool,
+
+    /// String to represent NULL values
     #[arg(long, default_value = "")]
     pub null_value: String,
 }

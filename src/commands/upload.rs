@@ -1,15 +1,6 @@
 use crate::cli::UploadArgs;
 use crate::format::FileFormat;
 
-/// Splits "schema.table" into (Some("schema"), "table") or (None, "table").
-fn parse_table_name(table: &str) -> (Option<&str>, &str) {
-    if let Some((schema, name)) = table.split_once('.') {
-        (Some(schema), name)
-    } else {
-        (None, table)
-    }
-}
-
 /// Executes the upload command: validates input, then either previews schema or imports data.
 pub async fn run(args: UploadArgs) -> anyhow::Result<()> {
     let file = &args.files[0];
@@ -45,7 +36,7 @@ fn print_schema(schema: &exarrow_rs::types::InferredTableSchema, table: &str) {
         println!("  {}: {}", col.ddl_name, col.exasol_type.to_ddl_type());
     }
 
-    let (schema_name, table_name) = parse_table_name(table);
+    let (schema_name, table_name) = super::parse_table_name(table);
     println!();
     println!("{}", schema.to_ddl(table_name, schema_name));
 }
@@ -90,7 +81,7 @@ async fn csv_import(path: &std::path::Path, args: &UploadArgs) -> anyhow::Result
 
     let mut conn = args.conn.connect().await?;
 
-    let (schema_name, table_name) = parse_table_name(&args.table);
+    let (schema_name, table_name) = super::parse_table_name(&args.table);
     let ddl = schema.to_ddl(table_name, schema_name).replacen(
         "CREATE TABLE",
         "CREATE TABLE IF NOT EXISTS",
