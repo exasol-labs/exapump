@@ -15,6 +15,7 @@ exapump is invoked as a single binary from the command line. All subcommands and
 * *THEN* the output MUST include the program description
 * *AND* the output MUST list the `upload` subcommand
 * *AND* the output MUST list the `sql` subcommand
+* *AND* the output MUST list the `export` subcommand
 * *AND* the output MUST show the `--help` and `--version` flags
 
 ### Scenario: Display version
@@ -28,5 +29,6 @@ exapump is invoked as a single binary from the command line. All subcommands and
 * *GIVEN* exapump is installed
 * *WHEN* the user runs `exapump` with no arguments
 * *THEN* the output MUST display help text
+* *AND* the output MUST list the `export` subcommand
 * *AND* the output MUST list the `sql` subcommand
 * *AND* the exit code SHOULD be non-zero
