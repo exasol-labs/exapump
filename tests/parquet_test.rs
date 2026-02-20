@@ -84,7 +84,7 @@ fn connection_failure() {
 
 #[tokio::test]
 async fn exasol_parquet_import_to_existing_table() {
-    fixtures::require_exasol();
+    fixtures::require_exasol!();
 
     let (mut conn, schema_name) = fixtures::setup_exasol_schema("EXAPUMP_PQ").await;
 
@@ -123,7 +123,7 @@ async fn exasol_parquet_import_to_existing_table() {
 
 #[tokio::test]
 async fn exasol_parquet_import_with_auto_table_creation() {
-    fixtures::require_exasol();
+    fixtures::require_exasol!();
 
     let (mut conn, schema_name) = fixtures::setup_exasol_schema("EXAPUMP_PQ").await;
 

@@ -46,7 +46,7 @@ fn teardown_schema(schema: &str) {
 
 #[test]
 fn export_table_to_csv() {
-    fixtures::require_exasol();
+    fixtures::require_exasol!();
     let schema = setup_schema("exp_tbl");
     setup_table(&schema, "test_data");
 
@@ -78,7 +78,7 @@ fn export_table_to_csv() {
 
 #[test]
 fn export_query_to_csv() {
-    fixtures::require_exasol();
+    fixtures::require_exasol!();
     let dir = tempfile::tempdir().unwrap();
     let output = dir.path().join("query.csv");
 
@@ -104,7 +104,7 @@ fn export_query_to_csv() {
 
 #[test]
 fn export_with_no_header() {
-    fixtures::require_exasol();
+    fixtures::require_exasol!();
     let schema = setup_schema("exp_noh");
     setup_table(&schema, "test_data");
 
@@ -159,7 +159,7 @@ fn export_with_no_header() {
 
 #[test]
 fn export_with_custom_delimiter() {
-    fixtures::require_exasol();
+    fixtures::require_exasol!();
     let dir = tempfile::tempdir().unwrap();
     let output = dir.path().join("tab.csv");
 
@@ -185,7 +185,7 @@ fn export_with_custom_delimiter() {
 
 #[test]
 fn export_empty_table() {
-    fixtures::require_exasol();
+    fixtures::require_exasol!();
     let schema = setup_schema("exp_empty");
 
     fixtures::exapump()
@@ -220,7 +220,7 @@ fn export_empty_table() {
 
 #[test]
 fn export_with_custom_quote() {
-    fixtures::require_exasol();
+    fixtures::require_exasol!();
     let dir = tempfile::tempdir().unwrap();
     let output = dir.path().join("quoted.csv");
 
@@ -249,7 +249,7 @@ fn export_with_custom_quote() {
 
 #[test]
 fn export_with_custom_null_value() {
-    fixtures::require_exasol();
+    fixtures::require_exasol!();
     let schema = setup_schema("exp_null");
 
     fixtures::exapump()
@@ -292,7 +292,7 @@ fn export_with_custom_null_value() {
 
 #[test]
 fn export_table_not_found() {
-    fixtures::require_exasol();
+    fixtures::require_exasol!();
 
     let dir = tempfile::tempdir().unwrap();
     let output = dir.path().join("notfound.csv");
@@ -314,7 +314,7 @@ fn export_table_not_found() {
 
 #[test]
 fn export_query_error() {
-    fixtures::require_exasol();
+    fixtures::require_exasol!();
 
     let dir = tempfile::tempdir().unwrap();
     let output = dir.path().join("error.csv");
@@ -336,7 +336,7 @@ fn export_query_error() {
 
 #[test]
 fn export_output_not_writable() {
-    fixtures::require_exasol();
+    fixtures::require_exasol!();
 
     fixtures::exapump()
         .env("EXAPUMP_DSN", fixtures::DOCKER_DSN)

@@ -9,10 +9,6 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  EXASOL_HOST: localhost
-  EXASOL_PORT: 8563
-  EXASOL_USER: sys
-  EXASOL_PASSWORD: exasol
 
 jobs:
   build:
@@ -67,9 +63,38 @@ jobs:
       - name: Check licenses
         run: cargo deny check licenses
 
-  tests:
-    name: Tests
+  unit-tests:
+    name: Unit Tests
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Run unit tests
+        run: cargo test --bin exapump --verbose
+
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    env:
+      EXASOL_HOST: localhost
+      EXASOL_PORT: "8563"
+      EXASOL_USER: sys
+      EXASOL_PASSWORD: exasol
+      REQUIRE_EXASOL: "1"
     steps:
       - uses: actions/checkout@v4
 
@@ -97,17 +122,7 @@ jobs:
             exasol/docker-db:2025.2.0
 
       - name: Wait for Exasol to be ready
-        run: |
-          echo "Waiting for Exasol on port 8563..."
-          for i in $(seq 1 120); do
-            if bash -c "echo > /dev/tcp/localhost/8563" 2>/dev/null; then
-              echo "Exasol is ready after ${i}s"
-              exit 0
-            fi
-            sleep 1
-          done
-          echo "Exasol failed to start within 120s"
-          exit 1
+        run: ./scripts/wait_for_exasol.sh
 
       - name: Run tests
         run: cargo test --verbose
@@ -117,3 +132,47 @@ jobs:
         run: |
           docker stop exasol-test || true
           docker rm exasol-test || true
+
+  build-binaries:
+    name: Binary (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            cross: false
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            cross: true
+          - target: x86_64-apple-darwin
+            os: macos-13
+            cross: false
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            cross: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross
+        if: ${{ matrix.cross }}
+        run: cargo install cross --locked
+
+      - name: Build (cross)
+        if: ${{ matrix.cross }}
+        run: cross build --release --target ${{ matrix.target }}
+
+      - name: Build (native)
+        if: ${{ !matrix.cross }}
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: exapump-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/exapump

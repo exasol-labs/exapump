@@ -17,17 +17,30 @@ pub const DUMMY_DSN: &str = "exasol://user:pwd@host:8563";
 pub const DOCKER_DSN: &str =
     "exasol://sys:exasol@localhost:8563?tls=true&validateservercertificate=0";
 
-/// Panics if Exasol is not reachable at localhost:8563.
-#[allow(dead_code)]
-pub fn require_exasol() {
-    use std::net::TcpStream;
-    use std::time::Duration;
-
-    TcpStream::connect_timeout(&"127.0.0.1:8563".parse().unwrap(), Duration::from_secs(2)).expect(
-        "Exasol is not available at localhost:8563. \
-         Start the Exasol Docker container to run these tests.",
-    );
+/// Skips the test if Exasol is not reachable (unless `REQUIRE_EXASOL` is set).
+///
+/// When `REQUIRE_EXASOL` is set (CI), panics on unreachable Exasol so failures
+/// are caught. When unset (local dev), the test is silently skipped so
+/// `cargo test` works without Docker.
+#[allow(unused_macros)]
+macro_rules! require_exasol {
+    () => {
+        use std::net::TcpStream;
+        use std::time::Duration;
+        let reachable =
+            TcpStream::connect_timeout(&"127.0.0.1:8563".parse().unwrap(), Duration::from_secs(2))
+                .is_ok();
+        if !reachable {
+            if std::env::var("REQUIRE_EXASOL").is_ok() {
+                panic!("REQUIRE_EXASOL is set but Exasol is not available at localhost:8563");
+            }
+            eprintln!("Skipping: Exasol not available at localhost:8563");
+            return;
+        }
+    };
 }
+#[allow(unused_imports)]
+pub(crate) use require_exasol;
 
 /// Creates a unique schema in Exasol and returns the connection and schema name.
 #[allow(dead_code)]
@@ -56,6 +69,7 @@ pub fn exapump() -> Command {
 
 /// Creates a small Parquet file at `dir/test.parquet` with 3 columns and 3 rows.
 /// Returns the path to the created file.
+#[allow(dead_code)]
 pub fn create_test_parquet(dir: &std::path::Path) -> PathBuf {
     let schema = Arc::new(Schema::new(vec![
         Field::new("id", DataType::Int64, false),

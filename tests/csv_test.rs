@@ -262,7 +262,7 @@ fn csv_connection_failure() {
 
 #[tokio::test]
 async fn exasol_csv_import_to_existing_table() {
-    fixtures::require_exasol();
+    fixtures::require_exasol!();
 
     let (mut conn, schema_name) = fixtures::setup_exasol_schema("EXAPUMP_CSV").await;
 
@@ -301,7 +301,7 @@ async fn exasol_csv_import_to_existing_table() {
 
 #[tokio::test]
 async fn exasol_csv_import_with_auto_table_creation() {
-    fixtures::require_exasol();
+    fixtures::require_exasol!();
 
     let (mut conn, schema_name) = fixtures::setup_exasol_schema("EXAPUMP_CSV").await;
 
@@ -332,7 +332,7 @@ async fn exasol_csv_import_with_auto_table_creation() {
 
 #[tokio::test]
 async fn exasol_csv_import_prints_row_count() {
-    fixtures::require_exasol();
+    fixtures::require_exasol!();
 
     let (mut conn, schema_name) = fixtures::setup_exasol_schema("EXAPUMP_CSV").await;
 
@@ -364,7 +364,7 @@ async fn exasol_csv_import_prints_row_count() {
 
 #[tokio::test]
 async fn exasol_csv_import_with_custom_delimiter() {
-    fixtures::require_exasol();
+    fixtures::require_exasol!();
 
     let (mut conn, schema_name) = fixtures::setup_exasol_schema("EXAPUMP_CSV").await;
 
@@ -395,7 +395,7 @@ async fn exasol_csv_import_with_custom_delimiter() {
 
 #[tokio::test]
 async fn exasol_csv_import_with_no_header() {
-    fixtures::require_exasol();
+    fixtures::require_exasol!();
 
     let (mut conn, schema_name) = fixtures::setup_exasol_schema("EXAPUMP_CSV").await;
 
@@ -425,7 +425,7 @@ async fn exasol_csv_import_with_no_header() {
 
 #[tokio::test]
 async fn exasol_csv_flags_ignored_for_parquet() {
-    fixtures::require_exasol();
+    fixtures::require_exasol!();
 
     let (mut conn, schema_name) = fixtures::setup_exasol_schema("EXAPUMP_CSV").await;
 
