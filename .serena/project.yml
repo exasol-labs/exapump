@@ -1,43 +1,14 @@
 # the name by which the project can be referenced within Serena
 project_name: "exapump"
 
-
-# list of languages for which language servers are started; choose from:
-#   al                  bash                clojure             cpp                 csharp
-#   csharp_omnisharp    dart                elixir              elm                 erlang
-#   fortran             fsharp              go                  groovy              haskell
-#   java                julia               kotlin              lua                 markdown
-#   matlab              nix                 pascal              perl                php
-#   php_phpactor        powershell          python              python_jedi         r
-#   rego                ruby                ruby_solargraph     rust                scala
-#   swift               terraform           toml                typescript          typescript_vts
-#   vue                 yaml                zig
-#   (This list may be outdated. For the current list, see values of Language enum here:
-#   https://github.com/oraios/serena/blob/main/src/solidlsp/ls_config.py
-#   For some languages, there are alternative language servers, e.g. csharp_omnisharp, ruby_solargraph.)
-# Note:
-#   - For C, use cpp
-#   - For JavaScript, use typescript
-#   - For Free Pascal/Lazarus, use pascal
-# Special requirements:
-#   Some languages require additional setup/installations.
-#   See here for details: https://oraios.github.io/serena/01-about/020_programming-languages.html#language-servers
-# When using multiple languages, the first language server that supports a given file will be used for that file.
-# The first language is the default language and the respective language server will be used as a fallback.
-# Note that when using the JetBrains backend, language servers are not used and this list is correspondingly ignored.
 languages:
 - rust
 
-# the encoding used by text files in the project
-# For a list of possible encodings, see https://docs.python.org/3.11/library/codecs.html#standard-encodings
 encoding: "utf-8"
 
 # whether to use project's .gitignore files to ignore files
 ignore_all_files_in_gitignore: true
 
-# list of additional paths to ignore in this project.
-# Same syntax as gitignore, so you can use * and **.
-# Note: global ignored_paths from serena_config.yml are also applied additively.
 ignored_paths: []
 
 # whether the project is in read-only mode
@@ -90,9 +61,13 @@ excluded_tools:
 - list_memories
 - delete_memory
 - edit_memory
+- activate_project
+- initial_instructions
 
 # list of tools to include that would otherwise be disabled (particularly optional tools that are disabled by default)
-included_optional_tools: []
+included_optional_tools:
+- delete_lines
+- insert_at_line
 
 # fixed set of tools to use as the base tool set (if non-empty), replacing Serena's default set of tools.
 # This cannot be combined with non-empty excluded_tools or included_optional_tools.
