@@ -16,6 +16,10 @@ clap = { version = "4", features = ["derive", "env"] }
 tokio = { version = "1", features = ["full"] }
 anyhow = "1"
 regex = "1"
+dotenvy = "0.15"
+arrow = "57"
+arrow-csv = "57"
+arrow-json = "57"
 
 [dev-dependencies]
 assert_cmd = "2"

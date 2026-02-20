@@ -71,9 +71,7 @@ fn csv_dry_run(path: &std::path::Path, args: &UploadArgs) -> anyhow::Result<()> 
 }
 
 async fn parquet_import(path: &std::path::Path, args: &UploadArgs) -> anyhow::Result<()> {
-    let driver = exarrow_rs::Driver::new();
-    let db = driver.open(&args.dsn)?;
-    let mut conn = db.connect().await?;
+    let mut conn = args.conn.connect().await?;
 
     let options = exarrow_rs::ParquetImportOptions::new()
         .with_create_table_if_not_exists(true)
@@ -90,9 +88,7 @@ async fn csv_import(path: &std::path::Path, args: &UploadArgs) -> anyhow::Result
     let inference_options = build_csv_inference_options(args);
     let schema = exarrow_rs::types::infer_schema_from_csv(path, &inference_options)?;
 
-    let driver = exarrow_rs::Driver::new();
-    let db = driver.open(&args.dsn)?;
-    let mut conn = db.connect().await?;
+    let mut conn = args.conn.connect().await?;
 
     let (schema_name, table_name) = parse_table_name(&args.table);
     let ddl = schema.to_ddl(table_name, schema_name).replacen(

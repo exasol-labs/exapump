@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand};
 
-/// The simplest path from file to Exasol table.
+/// The simplest path from file to Exasol table — import, export, and SQL in one command.
 #[derive(Parser)]
 #[command(name = "exapump", version, about)]
 pub struct Cli {
@@ -12,6 +12,27 @@ pub struct Cli {
 pub enum Commands {
     /// Upload files to an Exasol table
     Upload(UploadArgs),
+    /// Execute SQL statements against Exasol
+    Sql(SqlArgs),
+}
+
+#[derive(clap::Args)]
+pub struct SqlArgs {
+    /// SQL statement to execute (reads from stdin if omitted or if '-' is given)
+    pub sql: Option<String>,
+
+    #[command(flatten)]
+    pub conn: crate::connection::ConnectionArgs,
+
+    /// Output format for SELECT results
+    #[arg(short, long, value_enum, default_value_t = OutputFormat::Csv)]
+    pub format: OutputFormat,
+}
+
+#[derive(clap::ValueEnum, Clone, Debug)]
+pub enum OutputFormat {
+    Csv,
+    Json,
 }
 
 #[derive(clap::Args)]
@@ -24,9 +45,8 @@ pub struct UploadArgs {
     #[arg(short, long)]
     pub table: String,
 
-    /// Connection string (e.g., exasol://user:pwd@host:port)
-    #[arg(short, long, env = "EXAPUMP_DSN")]
-    pub dsn: String,
+    #[command(flatten)]
+    pub conn: crate::connection::ConnectionArgs,
 
     /// Preview inferred schema without loading data
     #[arg(long)]
