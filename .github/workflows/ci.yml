@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -11,31 +12,8 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
-    name: Build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo registry
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
-
-      - name: Build
-        run: cargo build --verbose
-
-  lint:
-    name: Lint
+  check:
+    name: Check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -45,33 +23,6 @@ jobs:
         with:
           components: clippy, rustfmt
 
-      - name: Check formatting
-        run: cargo fmt --all -- --check
-
-      - name: Clippy
-        run: cargo clippy --all-targets -- -D warnings
-
-  licenses:
-    name: License Check
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install cargo-deny
-        uses: taiki-e/install-action@cargo-deny
-
-      - name: Check licenses
-        run: cargo deny check licenses
-
-  unit-tests:
-    name: Unit Tests
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
       - name: Cache cargo registry
         uses: actions/cache@v4
         with:
@@ -82,6 +33,18 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@cargo-deny
+
+      - name: Check licenses
+        run: cargo deny check licenses
 
       - name: Run unit tests
         run: cargo test --bin exapump --verbose
@@ -98,6 +61,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Start Exasol container
+        run: |
+          docker run -d \
+            --name exasol-test \
+            --privileged \
+            --shm-size=1g \
+            -p 8563:8563 \
+            exasol/docker-db:2025.2.0
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
@@ -112,15 +84,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
-      - name: Start Exasol container
-        run: |
-          docker run -d \
-            --name exasol-test \
-            --privileged \
-            --shm-size=1g \
-            -p 8563:8563 \
-            exasol/docker-db:2025.2.0
-
       - name: Wait for Exasol to be ready
         run: ./scripts/wait_for_exasol.sh
 
@@ -134,7 +97,7 @@ jobs:
           docker rm exasol-test || true
 
   build-binaries:
-    name: Binary (${{ matrix.target }})
+    name: Binary (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -142,15 +105,23 @@ jobs:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
             cross: false
+            name: exapump-linux-x86_64
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
             cross: true
+            name: exapump-linux-aarch64
           - target: x86_64-apple-darwin
-            os: macos-13
+            os: macos-latest
             cross: false
+            name: exapump-macos-x86_64
           - target: aarch64-apple-darwin
             os: macos-latest
             cross: false
+            name: exapump-macos-aarch64
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            cross: false
+            name: exapump-windows-x86_64
     steps:
       - uses: actions/checkout@v4
 
@@ -160,19 +131,67 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Install cross
-        if: ${{ matrix.cross }}
+        if: matrix.cross
         run: cargo install cross --locked
 
       - name: Build (cross)
-        if: ${{ matrix.cross }}
+        if: matrix.cross
         run: cross build --release --target ${{ matrix.target }}
 
       - name: Build (native)
         if: ${{ !matrix.cross }}
         run: cargo build --release --target ${{ matrix.target }}
 
-      - name: Upload binary
+      - name: Upload binary (unix)
+        if: runner.os != 'Windows'
         uses: actions/upload-artifact@v4
         with:
-          name: exapump-${{ matrix.target }}
+          name: ${{ matrix.name }}
           path: target/${{ matrix.target }}/release/exapump
+
+      - name: Upload binary (windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: target/${{ matrix.target }}/release/exapump.exe
+
+  release:
+    name: Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build-binaries]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Prepare release assets
+        run: |
+          mkdir release-assets
+          for dir in artifacts/exapump-*/; do
+            name="$(basename "$dir")"
+            if [ "$name" = "exapump-windows-x86_64" ]; then
+              cp "$dir/exapump.exe" "release-assets/${name}.exe"
+            else
+              cp "$dir/exapump" "release-assets/${name}"
+              chmod +x "release-assets/${name}"
+            fi
+          done
+
+      - name: Install cargo-about
+        uses: taiki-e/install-action@cargo-about
+
+      - name: Generate third-party licenses
+        run: cargo about generate about.hbs > release-assets/third-party-licenses.txt
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: release-assets/*

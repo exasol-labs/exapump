@@ -1,0 +1,9 @@
+{{#each overview.used_by}}
+## {{name}} v{{version}}
+License: {{#each licenses}}{{id}}{{#unless @last}}, {{/unless}}{{/each}}
+{{#if authors}}Authors: {{authors}}{{/if}}
+
+{{#each licenses}}{{#if text}}{{{text}}}{{/if}}
+{{/each}}
+---
+{{/each}}
