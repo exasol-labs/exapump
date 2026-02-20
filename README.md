@@ -2,9 +2,12 @@
 
 ![exapump logo](assets/exapump-logo.svg)
 
+# exapump
+
 [![Rust](https://img.shields.io/badge/rust-stable-brightgreen.svg)](https://www.rust-lang.org/)
 [![CI](https://github.com/exasol-labs/exapump/actions/workflows/ci.yml/badge.svg)](https://github.com/exasol-labs/exapump/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
+
 
 Single-binary CLI for Exasol data exchange — import, export, and SQL in one command.
 
