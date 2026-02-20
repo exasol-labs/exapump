@@ -31,13 +31,13 @@ The upload command is the primary entrypoint for data ingestion. It accepts file
 
 ### Scenario: DSN from environment variable
 
-* *GIVEN* the `EXAPUMP_DSN` environment variable is set
+* *GIVEN* the `EXAPUMP_DSN` environment variable is set (via shell or `.env` file)
 * *WHEN* the user runs `exapump upload data.parquet --table my_table` without `--dsn`
 * *THEN* the CLI MUST accept the DSN from the environment variable
 
 ### Scenario: DSN flag overrides environment variable
 
-* *GIVEN* the `EXAPUMP_DSN` environment variable is set
+* *GIVEN* the `EXAPUMP_DSN` environment variable is set (via shell or `.env` file)
 * *AND* the user provides `--dsn` on the command line
 * *WHEN* the upload command parses arguments
 * *THEN* the `--dsn` flag value MUST take precedence over the environment variable
