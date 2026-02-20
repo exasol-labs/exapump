@@ -11,7 +11,7 @@ name = "exapump"
 path = "src/main.rs"
 
 [dependencies]
-exarrow-rs = { path = "../exarrow-rs" }
+exarrow-rs = "0.6.0"
 clap = { version = "4", features = ["derive", "env"] }
 tokio = { version = "1", features = ["full"] }
 anyhow = "1"
