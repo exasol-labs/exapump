@@ -13,6 +13,7 @@ fn display_top_level_help() {
         ))
         .stdout(predicate::str::contains("upload"))
         .stdout(predicate::str::contains("sql"))
+        .stdout(predicate::str::contains("export"))
         .stdout(predicate::str::contains("--help"))
         .stdout(predicate::str::contains("--version"));
 }
@@ -33,7 +34,8 @@ fn no_arguments_shows_help() {
         .assert()
         .code(2)
         .stdout(predicate::str::contains("upload"))
-        .stdout(predicate::str::contains("sql"));
+        .stdout(predicate::str::contains("sql"))
+        .stdout(predicate::str::contains("export"));
 }
 
 #[test]
@@ -207,4 +209,125 @@ fn sql_default_format_is_csv() {
         .assert()
         .success()
         .stdout(predicate::str::contains("[default: csv]"));
+}
+
+// --- Export subcommand tests ---
+
+#[test]
+fn export_help_shows_all_arguments() {
+    fixtures::exapump()
+        .args(["export", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--table"))
+        .stdout(predicate::str::contains("--query"))
+        .stdout(predicate::str::contains("--output"))
+        .stdout(predicate::str::contains("--format"))
+        .stdout(predicate::str::contains("--dsn"))
+        .stdout(predicate::str::contains("--delimiter"))
+        .stdout(predicate::str::contains("--quote"))
+        .stdout(predicate::str::contains("--no-header"))
+        .stdout(predicate::str::contains("--null-value"));
+}
+
+#[test]
+fn export_missing_required_arguments() {
+    fixtures::exapump()
+        .arg("export")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("required"));
+}
+
+#[test]
+fn export_table_and_query_mutually_exclusive() {
+    fixtures::exapump()
+        .env("EXAPUMP_DSN", fixtures::DUMMY_DSN)
+        .args([
+            "export",
+            "--table",
+            "schema.table",
+            "--query",
+            "SELECT 1",
+            "--output",
+            "/tmp/test.csv",
+            "--format",
+            "csv",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("cannot be used with"));
+}
+
+#[test]
+fn export_either_table_or_query_required() {
+    fixtures::exapump()
+        .env("EXAPUMP_DSN", fixtures::DUMMY_DSN)
+        .args(["export", "--output", "/tmp/test.csv", "--format", "csv"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("required"));
+}
+
+#[test]
+fn export_format_is_required() {
+    fixtures::exapump()
+        .env("EXAPUMP_DSN", fixtures::DUMMY_DSN)
+        .args([
+            "export",
+            "--table",
+            "schema.table",
+            "--output",
+            "/tmp/test.csv",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("required"));
+}
+
+#[test]
+fn export_dsn_from_environment_variable() {
+    // Will fail at connection, not at argument parsing
+    fixtures::exapump()
+        .env("EXAPUMP_DSN", fixtures::DUMMY_DSN)
+        .args([
+            "export",
+            "--table",
+            "schema.table",
+            "--output",
+            "/tmp/test.csv",
+            "--format",
+            "csv",
+        ])
+        .assert()
+        .failure()
+        .stderr(
+            predicate::str::contains("connect")
+                .or(predicate::str::contains("error"))
+                .or(predicate::str::contains("Error")),
+        );
+}
+
+#[test]
+fn export_dsn_flag_overrides_environment_variable() {
+    fixtures::exapump()
+        .env("EXAPUMP_DSN", "exasol://env:pwd@host:8563")
+        .args([
+            "export",
+            "--table",
+            "schema.table",
+            "--output",
+            "/tmp/test.csv",
+            "--format",
+            "csv",
+            "--dsn",
+            "exasol://flag:pwd@host:8563",
+        ])
+        .assert()
+        .failure()
+        .stderr(
+            predicate::str::contains("connect")
+                .or(predicate::str::contains("error"))
+                .or(predicate::str::contains("Error")),
+        );
 }
