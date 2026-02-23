@@ -26,7 +26,7 @@ fn display_version() {
         .assert()
         .success()
         .stdout(predicate::str::contains("exapump"))
-        .stdout(predicate::str::contains("0.4.0"));
+        .stdout(predicate::str::contains("0.4.1"));
 }
 
 #[test]
@@ -68,7 +68,8 @@ fn csv_flags_shown_with_defaults_in_help() {
         )
         .stdout(predicate::str::contains("--quote").and(predicate::str::contains("[default: \"]")))
         .stdout(
-            predicate::str::contains("--null-value").and(predicate::str::contains("[default: ]")),
+            predicate::str::contains("--null-value")
+                .and(predicate::str::contains("[default: \"\"]")),
         );
 }
 
