@@ -24,10 +24,10 @@ dotenvy = "0.15"
 arrow = "57"
 arrow-csv = "57"
 arrow-json = "57"
+parquet = "57"
 
 [dev-dependencies]
 assert_cmd = "2"
 predicates = "3"
 arrow = "57"
-parquet = "57"
 tempfile = "3"
