@@ -10,7 +10,7 @@ export EXASOL_PASSWORD="${EXASOL_PASSWORD:-exasol}"
 export REQUIRE_EXASOL="${REQUIRE_EXASOL:-1}"
 
 echo "=== Waiting for Exasol ==="
-"$SCRIPT_DIR/wait-for-exasol.sh"
+"$SCRIPT_DIR/wait-for-exasol.sh" exasol-test 120
 
 echo "=== Running all tests ==="
 cargo test --verbose

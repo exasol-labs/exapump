@@ -51,7 +51,7 @@ jobs:
           docker run -d \
             --name exasol-test \
             --privileged \
-            --shm-size=1g \
+            --shm-size=2g \
             -p 8563:8563 \
             exasol/docker-db:2025.2.0
 
@@ -69,8 +69,13 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
+      - name: Wait for Exasol to be ready
+        run: ./scripts/wait-for-exasol.sh exasol-test 240
+
       - name: Integration tests
-        run: ./scripts/integration-test.sh
+        env:
+          REQUIRE_EXASOL: "1"
+        run: cargo test --verbose
 
       - name: Exasol container logs
         if: always()

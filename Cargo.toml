@@ -10,10 +10,6 @@ authors = ["Exasol Labs <labs@exasol.com>"]
 name = "exapump"
 path = "src/main.rs"
 
-[[test]]
-name = "health_check"
-harness = false
-
 [dependencies]
 exarrow-rs = "0.6.0"
 clap = { version = "4", features = ["derive", "env"] }
