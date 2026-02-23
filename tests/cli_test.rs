@@ -14,6 +14,7 @@ fn display_top_level_help() {
         .stdout(predicate::str::contains("upload"))
         .stdout(predicate::str::contains("sql"))
         .stdout(predicate::str::contains("export"))
+        .stdout(predicate::str::contains("interactive"))
         .stdout(predicate::str::contains("--help"))
         .stdout(predicate::str::contains("--version"));
 }
@@ -35,7 +36,8 @@ fn no_arguments_shows_help() {
         .code(2)
         .stdout(predicate::str::contains("upload"))
         .stdout(predicate::str::contains("sql"))
-        .stdout(predicate::str::contains("export"));
+        .stdout(predicate::str::contains("export"))
+        .stdout(predicate::str::contains("interactive"));
 }
 
 #[test]
@@ -401,4 +403,29 @@ fn export_invalid_compression_rejected() {
             predicate::str::contains("invalid value")
                 .or(predicate::str::contains("possible values")),
         );
+}
+
+// --- Interactive subcommand tests ---
+
+#[test]
+fn interactive_help_shows_all_arguments() {
+    fixtures::exapump()
+        .args(["interactive", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--dsn"))
+        .stdout(
+            predicate::str::contains("interactive SQL session")
+                .or(predicate::str::contains("Interactive")),
+        );
+}
+
+#[test]
+fn interactive_missing_dsn() {
+    fixtures::exapump()
+        .args(["interactive"])
+        .env_remove("EXAPUMP_DSN")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("--dsn").or(predicate::str::contains("required")));
 }
