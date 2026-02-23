@@ -34,30 +34,15 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
-      - name: Check formatting
-        run: cargo fmt --all -- --check
-
-      - name: Clippy
-        run: cargo clippy --all-targets -- -D warnings
-
       - name: Install cargo-deny
         uses: taiki-e/install-action@cargo-deny
 
-      - name: Check licenses
-        run: cargo deny check licenses
-
-      - name: Run unit tests
-        run: cargo test --bin exapump --verbose
+      - name: Check and unit tests
+        run: ./scripts/check.sh
 
   integration-tests:
     name: Integration Tests
     runs-on: ubuntu-latest
-    env:
-      EXASOL_HOST: localhost
-      EXASOL_PORT: "8563"
-      EXASOL_USER: sys
-      EXASOL_PASSWORD: exasol
-      REQUIRE_EXASOL: "1"
     steps:
       - uses: actions/checkout@v4
 
@@ -84,11 +69,12 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
-      - name: Wait for Exasol to be ready
-        run: ./scripts/wait_for_exasol.sh
+      - name: Integration tests
+        run: ./scripts/integration-test.sh
 
-      - name: Run tests
-        run: cargo test --verbose
+      - name: Exasol container logs
+        if: always()
+        run: docker logs --tail 100 exasol-test 2>&1 || true
 
       - name: Stop Exasol container
         if: always()
