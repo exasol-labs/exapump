@@ -84,28 +84,25 @@ read_only: false
 #  * `think_about_task_adherence`: Thinking tool for determining whether the agent is still on track with the current task.
 #  * `think_about_whether_you_are_done`: Thinking tool for determining whether the task is truly completed.
 #  * `write_memory`: Writes a named memory (for future reference) to Serena's project-specific memory store.
-excluded_tools:
-- write_memory
-- read_memory
-- list_memories
-- delete_memory
-- edit_memory
-- check_onboarding_performed
-- activate_project
-- initial_instructions
+excluded_tools: []
 
 # list of tools to include that would otherwise be disabled (particularly optional tools that are disabled by default)
-included_optional_tools:
-- delete_lines
-- insert_at_line
-- think_about_collected_information
-- think_about_task_adherence
-- think_about_whether_you_are_done
-- replace_lines
+included_optional_tools: []
 
 # fixed set of tools to use as the base tool set (if non-empty), replacing Serena's default set of tools.
 # This cannot be combined with non-empty excluded_tools or included_optional_tools.
-fixed_tools: []
+fixed_tools:
+- find_file
+- find_referencing_symbols
+- find_symbol
+- get_symbols_overview
+- initial_instructions
+- insert_after_symbol
+- insert_before_symbol
+- list_dir
+- rename_symbol
+- replace_symbol_body
+- search_for_pattern
 
 # list of mode names to that are always to be included in the set of active modes
 # The full set of modes to be activated is base_modes + default_modes.
