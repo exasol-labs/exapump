@@ -1,10 +1,10 @@
 # Feature: Export Command Structure
 
-The `export` subcommand defines the argument interface for exporting data from Exasol to local files. It accepts a data source (`--table` or `--query`), output file path, format, connection string, and CSV formatting options. All arguments are parsed via clap derive macros.
+The `export` subcommand defines the argument interface for exporting data from Exasol to local files. It accepts a data source (`--table` or `--query`), output file path, format, connection string, CSV formatting options, and Parquet-specific options for compression and file splitting.
 
 ## Background
 
-The export command is the counterpart to upload. It writes data from Exasol to a local file. The data source is either a full table or a SQL query result. The output format is explicitly specified via `--format`.
+The export command is the counterpart to upload. It writes data from Exasol to a local file. The data source is either a full table or a SQL query result. The output format is explicitly specified via `--format`. The `--compression` option is only valid with `--format parquet`. The `--max-rows-per-file` and `--max-file-size` split options work with both CSV and Parquet formats.
 
 ## Scenarios
 
@@ -12,15 +12,13 @@ The export command is the counterpart to upload. It writes data from Exasol to a
 
 * *GIVEN* exapump is installed
 * *WHEN* the user runs `exapump export --help`
-* *THEN* the output MUST show a `--table` option
-* *AND* the output MUST show a `--query` option
-* *AND* the output MUST show an `--output` option
-* *AND* the output MUST show a `--format` option
-* *AND* the output MUST show a `--dsn` option
-* *AND* the output MUST show a `--delimiter` option
-* *AND* the output MUST show a `--quote` option
-* *AND* the output MUST show a `--no-header` flag
-* *AND* the output MUST show a `--null-value` option
+* *THEN* the output MUST show the `--table`, `--query`, `--output`, `--format`, `--dsn`, `--delimiter`, `--quote`, `--no-header`, `--null-value`, `--compression`, `--max-rows-per-file`, and `--max-file-size` options
+
+### Scenario: Format accepts csv and parquet
+
+* *GIVEN* exapump is installed
+* *WHEN* the user runs `exapump export --help`
+* *THEN* the `--format` option MUST accept `csv` and `parquet` as values
 
 ### Scenario: Missing required arguments
 
@@ -48,3 +46,16 @@ The export command is the counterpart to upload. It writes data from Exasol to a
 * *WHEN* the user runs `exapump export --table schema.table --output data.csv --dsn <dsn>` without `--format`
 * *THEN* the CLI MUST exit with a non-zero code
 * *AND* stderr MUST indicate that `--format` is required
+
+### Scenario: Compression default is snappy
+
+* *GIVEN* exapump is installed
+* *WHEN* the user runs `exapump export --table schema.table --output data.parquet --format parquet --dsn <dsn>` without `--compression`
+* *THEN* the export MUST use Snappy compression by default
+
+### Scenario: Invalid compression value rejected
+
+* *GIVEN* exapump is installed
+* *WHEN* the user runs `exapump export --table schema.table --output data.parquet --format parquet --compression brotli --dsn <dsn>`
+* *THEN* the CLI MUST exit with a non-zero code
+* *AND* stderr MUST list the valid compression values
