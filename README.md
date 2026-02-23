@@ -64,6 +64,27 @@ exapump sql 'SELECT count(*) FROM my_table' \
   --dsn exasol://user:pwd@host:8563
 ```
 
+**Interactive SQL session** with table-formatted output:
+
+```bash
+exapump interactive --dsn exasol://user:pwd@host:8563
+
+exapump> SELECT * FROM schema.users LIMIT 3;
+┌───────┬─────┐
+│ name  │ age │
+├───────┼─────┤
+│ Alice │ 30  │
+│ Bob   │ 25  │
+└───────┴─────┘
+2 rows
+
+exapump> .format csv
+Output format: csv
+
+exapump> .exit
+Bye!
+```
+
 Connection details can also be provided via environment variables (`EXAPUMP_DSN`) or a `.env` file.
 
 ---
@@ -75,6 +96,7 @@ Connection details can also be provided via environment variables (`EXAPUMP_DSN`
 | `upload` | Upload CSV or Parquet files to an Exasol table (auto-creates table if needed) |
 | `export` | Export an Exasol table or query result to a CSV file |
 | `sql` | Execute SQL statements and print results (CSV or JSON) |
+| `interactive` | Start an interactive SQL session with table/CSV/JSON output |
 
 Run `exapump <command> --help` for full argument details.
 
