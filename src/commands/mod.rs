@@ -1,4 +1,5 @@
 pub mod export;
+pub mod interactive;
 pub mod sql;
 pub mod upload;
 

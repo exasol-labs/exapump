@@ -25,6 +25,8 @@ arrow = "57"
 arrow-csv = "57"
 arrow-json = "57"
 parquet = "57"
+comfy-table = "7"
+rustyline = "17"
 
 [dev-dependencies]
 assert_cmd = "2"

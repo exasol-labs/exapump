@@ -1,4 +1,4 @@
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 
 /// The simplest path from file to Exasol table — import, export, and SQL in one command.
 #[derive(Parser)]
@@ -16,6 +16,8 @@ pub enum Commands {
     Sql(SqlArgs),
     /// Export an Exasol table or query result to a file
     Export(ExportArgs),
+    /// Start an interactive SQL session
+    Interactive(InteractiveArgs),
 }
 
 #[derive(clap::Args)]
@@ -148,4 +150,10 @@ pub struct ExportArgs {
     /// Maximum file size per output file, e.g. 500KB, 1MB, 2GB (enables file splitting)
     #[arg(long)]
     pub max_file_size: Option<String>,
+}
+
+#[derive(Args)]
+pub struct InteractiveArgs {
+    #[command(flatten)]
+    pub conn: crate::connection::ConnectionArgs,
 }

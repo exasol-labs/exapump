@@ -8,7 +8,7 @@ const STATUS_LINE_MAX_SQL_LEN: usize = 60;
 
 /// Split SQL input on semicolons, respecting single-quoted and double-quoted strings.
 /// Trailing semicolons produce no empty statements. Whitespace-only statements are skipped.
-fn split_statements(input: &str) -> Vec<String> {
+pub fn split_statements(input: &str) -> Vec<String> {
     let mut statements = Vec::new();
     let mut current = String::new();
     let mut in_single_quote = false;
@@ -47,7 +47,7 @@ fn split_statements(input: &str) -> Vec<String> {
 
 /// Classifies a SQL statement as a query (returns rows), DML (returns row count), or DDL (returns OK).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum StatementType {
+pub enum StatementType {
     Query,
     Dml,
     Ddl,
@@ -55,7 +55,7 @@ enum StatementType {
 
 impl StatementType {
     /// Classify a SQL statement by its first keyword.
-    fn from_sql(sql: &str) -> Self {
+    pub fn from_sql(sql: &str) -> Self {
         let first_word = sql.split_whitespace().next().unwrap_or("").to_uppercase();
 
         match first_word.as_str() {
@@ -83,7 +83,7 @@ fn truncate_sql(sql: &str, max_len: usize) -> String {
 }
 
 /// Pattern-match on error message (case-insensitive) to provide actionable hints.
-fn error_hint(message: &str) -> Option<&'static str> {
+pub fn error_hint(message: &str) -> Option<&'static str> {
     let lower = message.to_lowercase();
 
     if lower.contains("not found") && lower.contains("object") {
@@ -154,7 +154,7 @@ fn format_error(stmt_num: usize, sql: &str, error: &exarrow_rs::QueryError) {
 }
 
 /// Write record batches as CSV to stdout (with header).
-fn write_csv(batches: &[RecordBatch]) -> anyhow::Result<()> {
+pub fn write_csv(batches: &[RecordBatch]) -> anyhow::Result<()> {
     let mut writer = arrow_csv::WriterBuilder::new()
         .with_header(true)
         .build(std::io::stdout());
@@ -167,7 +167,7 @@ fn write_csv(batches: &[RecordBatch]) -> anyhow::Result<()> {
 }
 
 /// Write record batches as JSON array to stdout.
-fn write_json(batches: &[RecordBatch]) -> anyhow::Result<()> {
+pub fn write_json(batches: &[RecordBatch]) -> anyhow::Result<()> {
     let total_rows: usize = batches.iter().map(|b: &RecordBatch| b.num_rows()).sum();
 
     if total_rows == 0 {

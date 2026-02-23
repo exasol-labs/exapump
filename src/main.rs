@@ -26,6 +26,9 @@ async fn main() -> anyhow::Result<()> {
         Some(Commands::Export(args)) => {
             commands::export::run(args).await?;
         }
+        Some(Commands::Interactive(args)) => {
+            commands::interactive::run(args).await?;
+        }
         None => {
             let mut cmd = <Cli as clap::CommandFactory>::command();
             cmd.print_help()?;
