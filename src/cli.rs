@@ -40,6 +40,16 @@ pub enum OutputFormat {
 #[derive(clap::ValueEnum, Clone, Debug)]
 pub enum ExportFormat {
     Csv,
+    Parquet,
+}
+
+#[derive(clap::ValueEnum, Clone, Debug)]
+pub enum Compression {
+    Snappy,
+    Gzip,
+    Lz4,
+    Zstd,
+    None,
 }
 
 #[derive(clap::Args)]
@@ -126,4 +136,16 @@ pub struct ExportArgs {
     /// String to represent NULL values
     #[arg(long, default_value = "")]
     pub null_value: String,
+
+    /// Compression codec (Parquet only)
+    #[arg(long, value_enum)]
+    pub compression: Option<Compression>,
+
+    /// Maximum number of rows per output file (enables file splitting)
+    #[arg(long)]
+    pub max_rows_per_file: Option<u64>,
+
+    /// Maximum file size per output file, e.g. 500KB, 1MB, 2GB (enables file splitting)
+    #[arg(long)]
+    pub max_file_size: Option<String>,
 }

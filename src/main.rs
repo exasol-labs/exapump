@@ -2,6 +2,8 @@ mod cli;
 mod commands;
 mod connection;
 mod format;
+mod size;
+mod split;
 
 use std::io::Write;
 
