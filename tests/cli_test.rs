@@ -227,7 +227,10 @@ fn export_help_shows_all_arguments() {
         .stdout(predicate::str::contains("--delimiter"))
         .stdout(predicate::str::contains("--quote"))
         .stdout(predicate::str::contains("--no-header"))
-        .stdout(predicate::str::contains("--null-value"));
+        .stdout(predicate::str::contains("--null-value"))
+        .stdout(predicate::str::contains("--compression"))
+        .stdout(predicate::str::contains("--max-rows-per-file"))
+        .stdout(predicate::str::contains("--max-file-size"));
 }
 
 #[test]
@@ -329,5 +332,73 @@ fn export_dsn_flag_overrides_environment_variable() {
             predicate::str::contains("connect")
                 .or(predicate::str::contains("error"))
                 .or(predicate::str::contains("Error")),
+        );
+}
+
+#[test]
+fn export_format_accepts_parquet() {
+    // --format parquet is accepted (will fail at connection, not arg parsing)
+    fixtures::exapump()
+        .env("EXAPUMP_DSN", fixtures::DUMMY_DSN)
+        .args([
+            "export",
+            "--table",
+            "schema.table",
+            "--output",
+            "/tmp/test.parquet",
+            "--format",
+            "parquet",
+        ])
+        .assert()
+        .failure()
+        .stderr(
+            predicate::str::contains("connect")
+                .or(predicate::str::contains("error"))
+                .or(predicate::str::contains("Error")),
+        );
+}
+
+#[test]
+fn export_compression_rejected_for_csv() {
+    // --compression with --format csv should fail with a descriptive error
+    fixtures::exapump()
+        .env("EXAPUMP_DSN", fixtures::DUMMY_DSN)
+        .args([
+            "export",
+            "--table",
+            "schema.table",
+            "--output",
+            "/tmp/test.csv",
+            "--format",
+            "csv",
+            "--compression",
+            "snappy",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("compression").and(predicate::str::contains("Parquet")));
+}
+
+#[test]
+fn export_invalid_compression_rejected() {
+    // An invalid compression value should be rejected by clap with valid values listed
+    fixtures::exapump()
+        .env("EXAPUMP_DSN", fixtures::DUMMY_DSN)
+        .args([
+            "export",
+            "--table",
+            "schema.table",
+            "--output",
+            "/tmp/test.parquet",
+            "--format",
+            "parquet",
+            "--compression",
+            "brotli",
+        ])
+        .assert()
+        .failure()
+        .stderr(
+            predicate::str::contains("invalid value")
+                .or(predicate::str::contains("possible values")),
         );
 }
