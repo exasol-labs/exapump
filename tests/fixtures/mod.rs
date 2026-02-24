@@ -99,6 +99,42 @@ pub fn create_test_parquet(dir: &std::path::Path) -> PathBuf {
     path
 }
 
+/// Creates a Parquet file with a SQL-reserved keyword column (`timestamp`).
+/// Returns the path to the created file.
+#[allow(dead_code)]
+pub fn create_parquet_with_reserved_keyword(dir: &std::path::Path) -> PathBuf {
+    use arrow::array::TimestampMicrosecondArray;
+
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("id", DataType::Int64, false),
+        Field::new(
+            "timestamp",
+            DataType::Timestamp(arrow::datatypes::TimeUnit::Microsecond, None),
+            false,
+        ),
+        Field::new("value", DataType::Float64, false),
+    ]));
+
+    let batch = RecordBatch::try_new(
+        schema.clone(),
+        vec![
+            Arc::new(Int64Array::from(vec![1, 2, 3])),
+            Arc::new(TimestampMicrosecondArray::from(vec![
+                1_000_000, 2_000_000, 3_000_000,
+            ])),
+            Arc::new(Float64Array::from(vec![10.0, 20.0, 30.0])),
+        ],
+    )
+    .unwrap();
+
+    let path = dir.join("reserved_keyword.parquet");
+    let file = std::fs::File::create(&path).unwrap();
+    let mut writer = ArrowWriter::try_new(file, schema, None).unwrap();
+    writer.write(&batch).unwrap();
+    writer.close().unwrap();
+    path
+}
+
 /// Creates a small CSV file at `dir/test.csv` with 3 columns and 3 rows.
 /// Returns the path to the created file.
 #[allow(dead_code)]

@@ -44,7 +44,7 @@ fn print_schema(schema: &exarrow_rs::types::InferredTableSchema, table: &str) {
 fn parquet_dry_run(path: &std::path::Path, table: &str) -> anyhow::Result<()> {
     let schema = exarrow_rs::types::infer_schema_from_parquet(
         path,
-        exarrow_rs::types::ColumnNameMode::Sanitize,
+        exarrow_rs::types::ColumnNameMode::Quoted,
     )?;
 
     print_schema(&schema, table);
@@ -62,11 +62,23 @@ fn csv_dry_run(path: &std::path::Path, args: &UploadArgs) -> anyhow::Result<()> 
 }
 
 async fn parquet_import(path: &std::path::Path, args: &UploadArgs) -> anyhow::Result<()> {
+    let schema = exarrow_rs::types::infer_schema_from_parquet(
+        path,
+        exarrow_rs::types::ColumnNameMode::Quoted,
+    )?;
+
     let mut conn = args.conn.connect().await?;
 
+    let (schema_name, table_name) = super::parse_table_name(&args.table);
+    let ddl = schema.to_ddl(table_name, schema_name).replacen(
+        "CREATE TABLE",
+        "CREATE TABLE IF NOT EXISTS",
+        1,
+    );
+    conn.execute(&ddl).await?;
+
     let options = exarrow_rs::ParquetImportOptions::new()
-        .with_create_table_if_not_exists(true)
-        .with_column_name_mode(exarrow_rs::types::ColumnNameMode::Sanitize);
+        .with_column_name_mode(exarrow_rs::types::ColumnNameMode::Quoted);
 
     let rows = conn.import_from_parquet(&args.table, path, options).await?;
 
