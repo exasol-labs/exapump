@@ -47,6 +47,6 @@ async fn check(dsn: &str) -> anyhow::Result<()> {
     let driver = exarrow_rs::Driver::new();
     let db = driver.open(dsn)?;
     let mut conn = db.connect().await?;
-    conn.execute_update("SELECT 1").await?;
+    let _rows = conn.query("SELECT 1").await?;
     Ok(())
 }
