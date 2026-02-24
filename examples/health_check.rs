@@ -35,7 +35,7 @@ async fn main() {
         }
         Err(_) => {
             if std::env::var("REQUIRE_EXASOL").is_ok() {
-                eprintln!("Timed out after 10s");
+                eprintln!("Timed out connecting to {host}:{port} after 10s");
                 std::process::exit(1);
             }
             eprintln!("Skipping: Exasol not available (timeout)");

@@ -44,8 +44,6 @@ jobs:
     name: Integration Tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
       - name: Start Exasol container
         run: |
           docker run -d \
@@ -55,6 +53,8 @@ jobs:
             -e COSLWD_ENABLED=1 \
             -p 8563:8563 \
             exasol/docker-db:2025.2.0
+
+      - uses: actions/checkout@v4
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -71,7 +71,8 @@ jobs:
             ${{ runner.os }}-cargo-
 
       - name: Wait for Exasol to be ready
-        run: ./scripts/wait-for-exasol.sh exasol-test 240
+        timeout-minutes: 30
+        run: ./scripts/wait-for-exasol.sh exasol-test 1500
 
       - name: Integration tests
         env:
