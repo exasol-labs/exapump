@@ -26,7 +26,7 @@ fn display_version() {
         .assert()
         .success()
         .stdout(predicate::str::contains("exapump"))
-        .stdout(predicate::str::contains("0.4.1"));
+        .stdout(predicate::str::contains(env!("CARGO_PKG_VERSION")));
 }
 
 #[test]
