@@ -22,7 +22,7 @@ exapump connects to Exasol via exarrow-rs using the DSN provided by `--dsn` or `
 * *GIVEN* a Parquet file exists at the specified path
 * *AND* the target table does not exist in Exasol
 * *WHEN* the user runs `exapump upload data.parquet --table schema.new_table --dsn <dsn>`
-* *THEN* the command MUST create the target table with schema inferred from Parquet metadata
+* *THEN* the command MUST create the target table with column names quoted as double-quoted identifiers in the DDL
 * *AND* the command MUST import all rows and print the number of rows imported
 * *AND* the command MUST exit with code 0
 
@@ -30,9 +30,18 @@ exapump connects to Exasol via exarrow-rs using the DSN provided by `--dsn` or `
 
 * *GIVEN* a Parquet file exists at the specified path
 * *WHEN* the user runs `exapump upload data.parquet --table schema.table --dsn <dsn> --dry-run`
-* *THEN* the command MUST print the column names and Exasol types inferred from Parquet metadata
-* *AND* the command MUST print the planned CREATE TABLE DDL statement
+* *THEN* the command MUST print the column names as double-quoted identifiers and their Exasol types inferred from Parquet metadata
+* *AND* the command MUST print the planned CREATE TABLE DDL statement with all column names double-quoted
 * *AND* the command MUST NOT connect to Exasol or modify any data
+* *AND* the command MUST exit with code 0
+
+### Scenario: Parquet column with SQL reserved name
+
+* *GIVEN* a Parquet file exists with a column named `timestamp` (a reserved SQL keyword)
+* *AND* the target table does not exist in Exasol
+* *WHEN* the user runs `exapump upload data.parquet --table schema.new_table --dsn <dsn>`
+* *THEN* the command MUST create the target table with `"timestamp"` as a double-quoted column identifier
+* *AND* the command MUST import all rows and print the number of rows imported
 * *AND* the command MUST exit with code 0
 
 ### Scenario: File not found error
