@@ -11,6 +11,8 @@
 
 Single-binary CLI for Exasol data exchange — import, export, and SQL in one command.
 
+<img src="assets/demo.gif" width="720" alt="exapump demo">
+
 Based on [exarrow-rs](https://github.com/exasol-labs/exarrow-rs) — an ADBC driver for Exasol written in Rust.
 
 </div>
