@@ -294,6 +294,14 @@ async fn exasol_csv_import_to_existing_table() {
         .stdout(predicate::str::contains("Imported"))
         .stdout(predicate::str::contains("rows"));
 
+    let rs = conn
+        .execute(&format!("SELECT * FROM {schema_name}.CSV_EXISTING"))
+        .await
+        .unwrap();
+    let batches = rs.fetch_all().await.unwrap();
+    let row_count: usize = batches.iter().map(|b| b.num_rows()).sum();
+    assert_eq!(row_count, 3, "expected 3 rows in CSV_EXISTING");
+
     let _ = conn
         .execute_update(&format!("DROP SCHEMA {schema_name} CASCADE"))
         .await;
@@ -324,6 +332,14 @@ async fn exasol_csv_import_with_auto_table_creation() {
         .success()
         .stdout(predicate::str::contains("Imported"))
         .stdout(predicate::str::contains("rows"));
+
+    let rs = conn
+        .execute(&format!("SELECT * FROM {table_name}"))
+        .await
+        .unwrap();
+    let batches = rs.fetch_all().await.unwrap();
+    let row_count: usize = batches.iter().map(|b| b.num_rows()).sum();
+    assert_eq!(row_count, 3, "expected 3 rows in CSV_AUTO_CREATED");
 
     let _ = conn
         .execute_update(&format!("DROP SCHEMA {schema_name} CASCADE"))

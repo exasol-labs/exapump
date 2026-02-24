@@ -20,9 +20,9 @@ fn dry_run_shows_inferred_schema() {
         .assert()
         .success()
         .stdout(predicate::str::contains("Columns:"))
-        .stdout(predicate::str::contains("ID"))
-        .stdout(predicate::str::contains("NAME"))
-        .stdout(predicate::str::contains("SCORE"))
+        .stdout(predicate::str::contains("\"id\""))
+        .stdout(predicate::str::contains("\"name\""))
+        .stdout(predicate::str::contains("\"score\""))
         .stdout(predicate::str::contains("CREATE TABLE"));
 }
 
@@ -116,6 +116,14 @@ async fn exasol_parquet_import_to_existing_table() {
         .stdout(predicate::str::contains("Imported"))
         .stdout(predicate::str::contains("rows"));
 
+    let rs = conn
+        .execute(&format!("SELECT * FROM {schema_name}.UPLOAD_EXISTING"))
+        .await
+        .unwrap();
+    let batches = rs.fetch_all().await.unwrap();
+    let row_count: usize = batches.iter().map(|b| b.num_rows()).sum();
+    assert_eq!(row_count, 3, "expected 3 rows in UPLOAD_EXISTING");
+
     let _ = conn
         .execute_update(&format!("DROP SCHEMA {schema_name} CASCADE"))
         .await;
@@ -146,6 +154,74 @@ async fn exasol_parquet_import_with_auto_table_creation() {
         .success()
         .stdout(predicate::str::contains("Imported"))
         .stdout(predicate::str::contains("rows"));
+
+    let rs = conn
+        .execute(&format!("SELECT * FROM {table_name}"))
+        .await
+        .unwrap();
+    let batches = rs.fetch_all().await.unwrap();
+    let row_count: usize = batches.iter().map(|b| b.num_rows()).sum();
+    assert_eq!(row_count, 3, "expected 3 rows in AUTO_CREATED");
+
+    let _ = conn
+        .execute_update(&format!("DROP SCHEMA {schema_name} CASCADE"))
+        .await;
+}
+
+#[test]
+fn dry_run_quotes_reserved_keyword_columns() {
+    let dir = tempfile::tempdir().unwrap();
+    let parquet_path = fixtures::create_parquet_with_reserved_keyword(dir.path());
+
+    fixtures::exapump()
+        .args([
+            "upload",
+            parquet_path.to_str().unwrap(),
+            "--table",
+            "test_schema.test_table",
+            "--dsn",
+            fixtures::DUMMY_DSN,
+            "--dry-run",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"timestamp\""))
+        .stdout(predicate::str::contains("CREATE TABLE"));
+}
+
+#[tokio::test]
+async fn exasol_parquet_import_with_reserved_keyword_column() {
+    fixtures::require_exasol!();
+
+    let (mut conn, schema_name) = fixtures::setup_exasol_schema("EXAPUMP_PQ").await;
+
+    let dir = tempfile::tempdir().unwrap();
+    let parquet_path = fixtures::create_parquet_with_reserved_keyword(dir.path());
+
+    let table_name = format!("{schema_name}.RESERVED_KW");
+
+    fixtures::exapump()
+        .timeout(std::time::Duration::from_secs(60))
+        .args([
+            "upload",
+            parquet_path.to_str().unwrap(),
+            "--table",
+            &table_name,
+            "--dsn",
+            fixtures::DOCKER_DSN,
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Imported"))
+        .stdout(predicate::str::contains("rows"));
+
+    let rs = conn
+        .execute(&format!("SELECT * FROM {table_name}"))
+        .await
+        .unwrap();
+    let batches = rs.fetch_all().await.unwrap();
+    let row_count: usize = batches.iter().map(|b| b.num_rows()).sum();
+    assert_eq!(row_count, 3, "expected 3 rows in RESERVED_KW");
 
     let _ = conn
         .execute_update(&format!("DROP SCHEMA {schema_name} CASCADE"))
