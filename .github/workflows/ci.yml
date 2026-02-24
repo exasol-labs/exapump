@@ -35,7 +35,9 @@ jobs:
             ${{ runner.os }}-cargo-
 
       - name: Install cargo-deny
-        uses: taiki-e/install-action@cargo-deny
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
 
       - name: Check and unit tests
         run: ./scripts/check.sh
@@ -166,22 +168,26 @@ jobs:
 
       - name: Prepare release assets
         run: |
+          version="${GITHUB_REF_NAME#v}"
           mkdir release-assets
           for dir in artifacts/exapump-*/; do
             name="$(basename "$dir")"
+            versioned="${name/exapump-/exapump-${version}-}"
             if [ "$name" = "exapump-windows-x86_64" ]; then
-              cp "$dir/exapump.exe" "release-assets/${name}.exe"
+              cp "$dir/exapump.exe" "release-assets/${versioned}.exe"
             else
-              cp "$dir/exapump" "release-assets/${name}"
-              chmod +x "release-assets/${name}"
+              cp "$dir/exapump" "release-assets/${versioned}"
+              chmod +x "release-assets/${versioned}"
             fi
           done
 
       - name: Install cargo-about
-        uses: taiki-e/install-action@cargo-about
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-about
 
       - name: Generate third-party licenses
-        run: cargo about generate about.hbs > release-assets/third-party-licenses.txt
+        run: ./scripts/generate-licenses.sh > release-assets/third-party-licenses.txt
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2

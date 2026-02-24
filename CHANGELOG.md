@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.1
+
+- Bump exarrow-rs to 0.6.1 (fix hanging on missing schema)
+- Fix health check to use `query` instead of `execute_update`
+- Fix CI container startup timing and wait diagnostics
+
 ## 0.4.0
 
 - Interactive SQL REPL with readline history and table/CSV/JSON output

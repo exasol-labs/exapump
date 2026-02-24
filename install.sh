@@ -55,7 +55,7 @@ main() {
     exit 1
   fi
 
-  asset="exapump-${os}-${arch}"
+  asset="exapump-${version}-${os}-${arch}"
   url="https://github.com/${REPO}/releases/download/v${version}/${asset}"
 
   printf "Installing exapump v%s (%s/%s)...\n" "$version" "$os" "$arch"
