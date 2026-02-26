@@ -152,7 +152,7 @@ fn sql_missing_dsn() {
         .assert()
         .failure()
         .stderr(
-            predicate::str::contains("profile add default")
+            predicate::str::contains("No profiles found in config")
                 .or(predicate::str::contains("--dsn"))
                 .or(predicate::str::contains("No connection")),
         );
@@ -446,7 +446,7 @@ fn interactive_missing_dsn() {
         .assert()
         .failure()
         .stderr(
-            predicate::str::contains("profile add default")
+            predicate::str::contains("No profiles found in config")
                 .or(predicate::str::contains("--dsn"))
                 .or(predicate::str::contains("No connection")),
         );

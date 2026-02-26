@@ -40,6 +40,7 @@ host = "localhost"
 port = 8563
 user = "sys"
 password = "exasol"
+default = true
 
 [production]
 host = "prod.example.com"
@@ -54,7 +55,7 @@ password = "secret"
         .args(["profile", "list"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("default *"))
+        .stdout(predicate::str::contains("default (default)"))
         .stdout(predicate::str::contains("production"));
 }
 
@@ -441,5 +442,371 @@ fn no_config_no_dsn_error() {
         .args(["sql", "SELECT 1"])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("profile add default"));
+        .stderr(predicate::str::contains("No profiles found in config"));
+}
+
+// ──────────────────────────────────────────────
+// --default flag tests
+// ──────────────────────────────────────────────
+
+#[test]
+fn profile_add_with_default_flag() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join(".exapump").join("config.toml");
+    std::fs::create_dir_all(config_path.parent().unwrap()).unwrap();
+
+    fixtures::exapump()
+        .env("EXAPUMP_CONFIG", config_path.to_str().unwrap())
+        .args([
+            "profile",
+            "add",
+            "prod",
+            "--host",
+            "prod.example.com",
+            "--user",
+            "admin",
+            "--password",
+            "s3cret",
+            "--default",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Profile 'prod' added"));
+
+    // Verify the config file contains default = true
+    let content = std::fs::read_to_string(&config_path).unwrap();
+    assert!(
+        content.contains("default = true"),
+        "config should contain 'default = true', got:\n{}",
+        content
+    );
+}
+
+#[test]
+fn profile_add_default_clears_others() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = write_config(
+        dir.path(),
+        r#"
+[existing]
+host = "localhost"
+port = 8563
+user = "sys"
+password = "exasol"
+default = true
+"#,
+    );
+
+    // Adding a new profile with --default should clear the existing default
+    fixtures::exapump()
+        .env("EXAPUMP_CONFIG", config_path.to_str().unwrap())
+        .args([
+            "profile",
+            "add",
+            "prod",
+            "--host",
+            "prod.example.com",
+            "--user",
+            "admin",
+            "--password",
+            "s3cret",
+            "--default",
+        ])
+        .assert()
+        .success();
+
+    // Verify: prod has default = true, existing does NOT
+    let content = std::fs::read_to_string(&config_path).unwrap();
+    let config: toml::Table = toml::from_str(&content).unwrap();
+
+    let prod_default = config["prod"].get("default").and_then(|v| v.as_bool());
+    assert_eq!(prod_default, Some(true), "prod should have default = true");
+
+    let existing_default = config["existing"].get("default").and_then(|v| v.as_bool());
+    assert_eq!(
+        existing_default, None,
+        "existing should not have default field, got: {:?}",
+        existing_default
+    );
+}
+
+#[test]
+fn profile_add_without_default_flag_no_default_field() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join(".exapump").join("config.toml");
+    std::fs::create_dir_all(config_path.parent().unwrap()).unwrap();
+
+    fixtures::exapump()
+        .env("EXAPUMP_CONFIG", config_path.to_str().unwrap())
+        .args([
+            "profile",
+            "add",
+            "prod",
+            "--host",
+            "prod.example.com",
+            "--user",
+            "admin",
+            "--password",
+            "s3cret",
+        ])
+        .assert()
+        .success();
+
+    // Verify the config file does NOT contain default field
+    let content = std::fs::read_to_string(&config_path).unwrap();
+    assert!(
+        !content.contains("default = true"),
+        "config should not contain 'default = true' when flag not set, got:\n{}",
+        content
+    );
+}
+
+// ──────────────────────────────────────────────
+// Profile list (default) annotation tests
+// ──────────────────────────────────────────────
+
+#[test]
+fn profile_list_shows_default_annotation_for_default_field() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = write_config(
+        dir.path(),
+        r#"
+[production]
+host = "prod.example.com"
+port = 8563
+user = "admin"
+password = "secret"
+default = true
+
+[staging]
+host = "staging.example.com"
+port = 8563
+user = "admin"
+password = "secret"
+"#,
+    );
+
+    fixtures::exapump()
+        .env("EXAPUMP_CONFIG", config_path.to_str().unwrap())
+        .args(["profile", "list"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("production (default)"))
+        .stdout(predicate::str::contains("staging"))
+        // Should NOT use old * format
+        .stdout(predicate::str::contains("*").not());
+}
+
+#[test]
+fn profile_list_single_profile_shows_default() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = write_config(
+        dir.path(),
+        r#"
+[mydb]
+host = "localhost"
+port = 8563
+user = "sys"
+password = "exasol"
+"#,
+    );
+
+    fixtures::exapump()
+        .env("EXAPUMP_CONFIG", config_path.to_str().unwrap())
+        .args(["profile", "list"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("mydb (default)"));
+}
+
+// ──────────────────────────────────────────────
+// Profile show default field tests
+// ──────────────────────────────────────────────
+
+#[test]
+fn profile_show_displays_default_true() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = write_config(
+        dir.path(),
+        r#"
+[prod]
+host = "prod.example.com"
+port = 8563
+user = "admin"
+password = "secret"
+default = true
+"#,
+    );
+
+    fixtures::exapump()
+        .env("EXAPUMP_CONFIG", config_path.to_str().unwrap())
+        .args(["profile", "show", "prod"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("default: true"));
+}
+
+#[test]
+fn profile_show_displays_default_false() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = write_config(
+        dir.path(),
+        r#"
+[staging]
+host = "staging.example.com"
+port = 8563
+user = "admin"
+password = "secret"
+"#,
+    );
+
+    fixtures::exapump()
+        .env("EXAPUMP_CONFIG", config_path.to_str().unwrap())
+        .args(["profile", "show", "staging"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("default: false"));
+}
+
+// ──────────────────────────────────────────────
+// Default resolution logic tests
+// ──────────────────────────────────────────────
+
+/// Multiple profiles, one has `default = true` — that profile is auto-selected
+/// when running a command without --dsn or --profile.
+/// Expects a connection-level error (not a config resolution error).
+#[test]
+fn default_profile_via_field() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = write_config(
+        dir.path(),
+        r#"
+[production]
+host = "prod.example.com"
+port = 8563
+user = "admin"
+password = "secret"
+default = true
+
+[staging]
+host = "staging.example.com"
+port = 8563
+user = "stager"
+password = "stagepwd"
+"#,
+    );
+
+    // Should fail at connection level (trying to connect to prod.example.com),
+    // NOT with a config resolution error like "No default profile set".
+    fixtures::exapump()
+        .env("EXAPUMP_CONFIG", config_path.to_str().unwrap())
+        .env_remove("EXAPUMP_DSN")
+        .args(["sql", "SELECT 1"])
+        .assert()
+        .failure()
+        .stderr(
+            predicate::str::contains("connect")
+                .or(predicate::str::contains("error"))
+                .or(predicate::str::contains("Error")),
+        )
+        // Must NOT contain config resolution errors
+        .stderr(predicate::str::contains("No default profile set").not())
+        .stderr(predicate::str::contains("Multiple default profiles").not());
+}
+
+/// A single profile (without `default = true`) is auto-selected as the default.
+/// Uses a non-"default" name to confirm auto-selection is based on count, not name.
+#[test]
+fn single_profile_auto_default() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = write_config(
+        dir.path(),
+        r#"
+[mydb]
+host = "mydb.example.com"
+port = 8563
+user = "dbuser"
+password = "dbpass"
+"#,
+    );
+
+    // Should fail at connection level, not at config resolution
+    fixtures::exapump()
+        .env("EXAPUMP_CONFIG", config_path.to_str().unwrap())
+        .env_remove("EXAPUMP_DSN")
+        .args(["sql", "SELECT 1"])
+        .assert()
+        .failure()
+        .stderr(
+            predicate::str::contains("connect")
+                .or(predicate::str::contains("error"))
+                .or(predicate::str::contains("Error")),
+        )
+        // Must NOT contain config resolution errors
+        .stderr(predicate::str::contains("No default profile set").not())
+        .stderr(predicate::str::contains("No profiles found").not());
+}
+
+/// Config with multiple profiles where TWO have `default = true`.
+/// Should error with "Multiple default profiles found".
+#[test]
+fn multiple_defaults_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = write_config(
+        dir.path(),
+        r#"
+[production]
+host = "prod.example.com"
+port = 8563
+user = "admin"
+password = "secret"
+default = true
+
+[staging]
+host = "staging.example.com"
+port = 8563
+user = "stager"
+password = "stagepwd"
+default = true
+"#,
+    );
+
+    fixtures::exapump()
+        .env("EXAPUMP_CONFIG", config_path.to_str().unwrap())
+        .env_remove("EXAPUMP_DSN")
+        .args(["sql", "SELECT 1"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Multiple default profiles found"));
+}
+
+/// Config with multiple profiles where NONE has `default = true`.
+/// Should error with "No default profile set".
+#[test]
+fn no_default_among_multiple_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = write_config(
+        dir.path(),
+        r#"
+[production]
+host = "prod.example.com"
+port = 8563
+user = "admin"
+password = "secret"
+
+[staging]
+host = "staging.example.com"
+port = 8563
+user = "stager"
+password = "stagepwd"
+"#,
+    );
+
+    fixtures::exapump()
+        .env("EXAPUMP_CONFIG", config_path.to_str().unwrap())
+        .env_remove("EXAPUMP_DSN")
+        .args(["sql", "SELECT 1"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("No default profile set"));
 }

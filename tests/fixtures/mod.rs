@@ -17,11 +17,10 @@ pub const DUMMY_DSN: &str = "exasol://user:pwd@host:8563";
 pub const DOCKER_DSN: &str =
     "exasol://sys:exasol@localhost:8563?tls=true&validateservercertificate=0";
 
-/// Skips the test if Exasol is not reachable (unless `REQUIRE_EXASOL` is set).
+/// Panics if Exasol is not reachable at localhost:8563.
 ///
-/// When `REQUIRE_EXASOL` is set (CI), panics on unreachable Exasol so failures
-/// are caught. When unset (local dev), the test is silently skipped so
-/// `cargo test` works without Docker.
+/// Start a local instance with:
+/// `docker run -d --name exasol-test --privileged --shm-size=2g -p 8563:8563 exasol/docker-db:2025.2.0`
 #[allow(unused_macros)]
 macro_rules! require_exasol {
     () => {
@@ -31,11 +30,7 @@ macro_rules! require_exasol {
             TcpStream::connect_timeout(&"127.0.0.1:8563".parse().unwrap(), Duration::from_secs(2))
                 .is_ok();
         if !reachable {
-            if std::env::var("REQUIRE_EXASOL").is_ok() {
-                panic!("REQUIRE_EXASOL is set but Exasol is not available at localhost:8563");
-            }
-            eprintln!("Skipping: Exasol not available at localhost:8563");
-            return;
+            panic!("Exasol is not available at localhost:8563. Start it with: docker run -d --name exasol-test --privileged --shm-size=2g -p 8563:8563 exasol/docker-db:2025.2.0");
         }
     };
 }
