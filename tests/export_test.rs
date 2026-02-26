@@ -79,6 +79,9 @@ fn export_table_to_csv() {
 #[test]
 fn export_query_to_csv() {
     fixtures::require_exasol!();
+    let schema = setup_schema("exp_qcsv");
+    setup_table(&schema, "test_data");
+
     let dir = tempfile::tempdir().unwrap();
     let output = dir.path().join("query.csv");
 
@@ -87,7 +90,7 @@ fn export_query_to_csv() {
         .args([
             "export",
             "--query",
-            "SELECT 1 AS n, 2 AS m",
+            &format!("SELECT id, name FROM {schema}.test_data"),
             "--output",
             output.to_str().unwrap(),
             "--format",
@@ -95,11 +98,20 @@ fn export_query_to_csv() {
         ])
         .assert()
         .success()
-        .stderr(predicate::str::contains("Exported 2 rows"));
+        .stderr(predicate::str::contains("Exported"));
 
     let content = std::fs::read_to_string(&output).unwrap();
-    assert!(content.contains("1"));
-    assert!(content.contains("2"));
+    assert!(content.contains("Alice"), "Expected Alice in query result");
+    assert!(content.contains("Bob"), "Expected Bob in query result");
+    assert!(
+        content.contains("Charlie"),
+        "Expected Charlie in query result"
+    );
+
+    let data_lines = content.lines().count() - 1;
+    assert_eq!(data_lines, 3, "Expected 3 data rows from query");
+
+    teardown_schema(&schema);
 }
 
 #[test]
@@ -397,6 +409,9 @@ fn export_table_to_parquet() {
 #[test]
 fn export_query_to_parquet() {
     fixtures::require_exasol!();
+    let schema = setup_schema("exp_qpq");
+    setup_table(&schema, "test_data");
+
     let dir = tempfile::tempdir().unwrap();
     let output = dir.path().join("query.parquet");
 
@@ -405,7 +420,7 @@ fn export_query_to_parquet() {
         .args([
             "export",
             "--query",
-            "SELECT 1 AS n, 'hello' AS msg",
+            &format!("SELECT id, name FROM {schema}.test_data"),
             "--output",
             output.to_str().unwrap(),
             "--format",
@@ -422,7 +437,12 @@ fn export_query_to_parquet() {
         .unwrap();
     let batches: Vec<_> = reader.map(|r| r.unwrap()).collect();
     let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
-    assert_eq!(total_rows, 1);
+    assert_eq!(
+        total_rows, 3,
+        "Expected 3 rows from query against test_data"
+    );
+
+    teardown_schema(&schema);
 }
 
 #[test]
@@ -754,4 +774,478 @@ fn export_csv_split_with_no_header() {
     );
 
     teardown_schema(&schema);
+}
+
+#[test]
+fn export_query_with_where_to_csv() {
+    fixtures::require_exasol!();
+    let schema = setup_schema("exp_qwhere_csv");
+    setup_table(&schema, "test_data");
+
+    let dir = tempfile::tempdir().unwrap();
+    let output = dir.path().join("filtered.csv");
+
+    fixtures::exapump()
+        .env("EXAPUMP_DSN", fixtures::DOCKER_DSN)
+        .args([
+            "export",
+            "--query",
+            &format!("SELECT id, name, score FROM {schema}.test_data WHERE score > 90"),
+            "--output",
+            output.to_str().unwrap(),
+            "--format",
+            "csv",
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Exported"));
+
+    let content = std::fs::read_to_string(&output).unwrap();
+    assert!(
+        content.contains("Alice"),
+        "Expected Alice (score 95.5) in filtered output"
+    );
+    assert!(
+        content.contains("Charlie"),
+        "Expected Charlie (score 92.3) in filtered output"
+    );
+    assert!(
+        !content.contains("Bob"),
+        "Bob (score 87.0) should be excluded by WHERE clause"
+    );
+
+    let data_lines = content.lines().count() - 1;
+    assert_eq!(
+        data_lines, 2,
+        "Expected 2 data rows after filtering (Alice and Charlie)"
+    );
+
+    teardown_schema(&schema);
+}
+
+#[test]
+fn export_query_with_where_to_parquet() {
+    fixtures::require_exasol!();
+    let schema = setup_schema("exp_qwhere_pq");
+    setup_table(&schema, "test_data");
+
+    let dir = tempfile::tempdir().unwrap();
+    let output = dir.path().join("filtered.parquet");
+
+    fixtures::exapump()
+        .env("EXAPUMP_DSN", fixtures::DOCKER_DSN)
+        .args([
+            "export",
+            "--query",
+            &format!("SELECT id, name, score FROM {schema}.test_data WHERE score > 90"),
+            "--output",
+            output.to_str().unwrap(),
+            "--format",
+            "parquet",
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Exported"));
+
+    let file = std::fs::File::open(&output).unwrap();
+    let reader = parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::try_new(file)
+        .unwrap()
+        .build()
+        .unwrap();
+    let batches: Vec<_> = reader.map(|r| r.unwrap()).collect();
+    let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
+    assert_eq!(
+        total_rows, 2,
+        "Expected 2 rows after WHERE score > 90 (Alice and Charlie)"
+    );
+
+    teardown_schema(&schema);
+}
+
+#[test]
+fn export_table_and_query_mutually_exclusive() {
+    let dir = tempfile::tempdir().unwrap();
+    let output = dir.path().join("both.csv");
+
+    fixtures::exapump()
+        .args([
+            "export",
+            "--table",
+            "some_schema.some_table",
+            "--query",
+            "SELECT 1",
+            "--output",
+            output.to_str().unwrap(),
+            "--format",
+            "csv",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("cannot be used with"));
+}
+
+#[test]
+fn export_requires_table_or_query() {
+    let dir = tempfile::tempdir().unwrap();
+    let output = dir.path().join("neither.csv");
+
+    fixtures::exapump()
+        .args([
+            "export",
+            "--output",
+            output.to_str().unwrap(),
+            "--format",
+            "csv",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("required"));
+}
+
+/// Helper to create and populate a test table with a configurable number of rows.
+fn setup_large_table(schema: &str, table: &str, row_count: usize) {
+    let mut sql =
+        format!("CREATE TABLE {schema}.{table} (id INT, name VARCHAR(100), score DOUBLE);");
+    for i in 1..=row_count {
+        sql.push_str(&format!(
+            " INSERT INTO {schema}.{table} VALUES ({i}, 'Name_{i:04}', {}.{});",
+            i * 10,
+            i % 100,
+        ));
+    }
+    fixtures::exapump()
+        .env("EXAPUMP_DSN", fixtures::DOCKER_DSN)
+        .args(["sql", &sql])
+        .assert()
+        .success();
+}
+
+#[test]
+fn export_csv_split_by_file_size() {
+    fixtures::require_exasol!();
+    let schema = setup_schema("exp_csv_fsplit");
+    setup_large_table(&schema, "big_data", 20);
+
+    let dir = tempfile::tempdir().unwrap();
+    let output = dir.path().join("fsplit.csv");
+
+    fixtures::exapump()
+        .env("EXAPUMP_DSN", fixtures::DOCKER_DSN)
+        .args([
+            "export",
+            "--table",
+            &format!("{schema}.big_data"),
+            "--output",
+            output.to_str().unwrap(),
+            "--format",
+            "csv",
+            "--max-file-size",
+            "100",
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("file(s)"));
+
+    let split_0 = dir.path().join("fsplit_000.csv");
+    let split_1 = dir.path().join("fsplit_001.csv");
+    assert!(split_0.exists(), "Expected fsplit_000.csv to exist");
+    assert!(split_1.exists(), "Expected fsplit_001.csv to exist");
+
+    teardown_schema(&schema);
+}
+
+#[test]
+fn export_csv_split_preserves_formatting() {
+    fixtures::require_exasol!();
+    let schema = setup_schema("exp_csv_fmtsplit");
+    setup_table(&schema, "test_data");
+
+    let dir = tempfile::tempdir().unwrap();
+    let output = dir.path().join("fmtsplit.csv");
+
+    fixtures::exapump()
+        .env("EXAPUMP_DSN", fixtures::DOCKER_DSN)
+        .args([
+            "export",
+            "--table",
+            &format!("{schema}.test_data"),
+            "--output",
+            output.to_str().unwrap(),
+            "--format",
+            "csv",
+            "--delimiter",
+            "\t",
+            "--max-rows-per-file",
+            "1",
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("file(s)"));
+
+    let split_0 = dir.path().join("fmtsplit_000.csv");
+    let split_1 = dir.path().join("fmtsplit_001.csv");
+    assert!(split_0.exists(), "Expected fmtsplit_000.csv to exist");
+    assert!(split_1.exists(), "Expected fmtsplit_001.csv to exist");
+
+    let content0 = std::fs::read_to_string(&split_0).unwrap();
+    let content1 = std::fs::read_to_string(&split_1).unwrap();
+    assert!(
+        content0.contains('\t'),
+        "Split file 0 must use tab delimiter"
+    );
+    assert!(
+        content1.contains('\t'),
+        "Split file 1 must use tab delimiter"
+    );
+
+    teardown_schema(&schema);
+}
+
+#[test]
+fn export_csv_split_both_thresholds() {
+    fixtures::require_exasol!();
+    let schema = setup_schema("exp_csv_both");
+    setup_large_table(&schema, "big_data", 20);
+
+    let dir = tempfile::tempdir().unwrap();
+    let output = dir.path().join("both.csv");
+
+    fixtures::exapump()
+        .env("EXAPUMP_DSN", fixtures::DOCKER_DSN)
+        .args([
+            "export",
+            "--table",
+            &format!("{schema}.big_data"),
+            "--output",
+            output.to_str().unwrap(),
+            "--format",
+            "csv",
+            "--max-rows-per-file",
+            "5",
+            "--max-file-size",
+            "100",
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("file(s)"));
+
+    let split_0 = dir.path().join("both_000.csv");
+    let split_1 = dir.path().join("both_001.csv");
+    assert!(split_0.exists(), "Expected both_000.csv to exist");
+    assert!(split_1.exists(), "Expected both_001.csv to exist");
+
+    teardown_schema(&schema);
+}
+
+#[test]
+fn export_parquet_no_compression() {
+    fixtures::require_exasol!();
+    let schema = setup_schema("exp_pq_nocomp");
+    setup_table(&schema, "test_data");
+
+    let dir = tempfile::tempdir().unwrap();
+    let output = dir.path().join("nocomp.parquet");
+
+    fixtures::exapump()
+        .env("EXAPUMP_DSN", fixtures::DOCKER_DSN)
+        .args([
+            "export",
+            "--table",
+            &format!("{schema}.test_data"),
+            "--output",
+            output.to_str().unwrap(),
+            "--format",
+            "parquet",
+            "--compression",
+            "none",
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Exported"));
+
+    let file = std::fs::File::open(&output).unwrap();
+    let reader = parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::try_new(file)
+        .unwrap()
+        .build()
+        .unwrap();
+    let batches: Vec<_> = reader.map(|r| r.unwrap()).collect();
+    let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
+    assert_eq!(total_rows, 3, "Expected 3 rows with no compression");
+
+    teardown_schema(&schema);
+}
+
+#[test]
+fn export_parquet_split_by_file_size() {
+    fixtures::require_exasol!();
+    let schema = setup_schema("exp_pq_fsplit");
+    setup_large_table(&schema, "big_data", 20);
+
+    let dir = tempfile::tempdir().unwrap();
+    let output = dir.path().join("pqfsplit.parquet");
+
+    fixtures::exapump()
+        .env("EXAPUMP_DSN", fixtures::DOCKER_DSN)
+        .args([
+            "export",
+            "--table",
+            &format!("{schema}.big_data"),
+            "--output",
+            output.to_str().unwrap(),
+            "--format",
+            "parquet",
+            "--max-rows-per-file",
+            "10",
+            "--max-file-size",
+            "100",
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("file(s)"));
+
+    let split_0 = dir.path().join("pqfsplit_000.parquet");
+    let split_1 = dir.path().join("pqfsplit_001.parquet");
+    assert!(split_0.exists(), "Expected pqfsplit_000.parquet to exist");
+    assert!(split_1.exists(), "Expected pqfsplit_001.parquet to exist");
+
+    teardown_schema(&schema);
+}
+
+#[test]
+fn export_parquet_split_both_thresholds() {
+    fixtures::require_exasol!();
+    let schema = setup_schema("exp_pq_both");
+    setup_large_table(&schema, "big_data", 20);
+
+    let dir = tempfile::tempdir().unwrap();
+    let output = dir.path().join("pqboth.parquet");
+
+    fixtures::exapump()
+        .env("EXAPUMP_DSN", fixtures::DOCKER_DSN)
+        .args([
+            "export",
+            "--table",
+            &format!("{schema}.big_data"),
+            "--output",
+            output.to_str().unwrap(),
+            "--format",
+            "parquet",
+            "--max-rows-per-file",
+            "5",
+            "--max-file-size",
+            "100",
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("file(s)"));
+
+    let split_0 = dir.path().join("pqboth_000.parquet");
+    let split_1 = dir.path().join("pqboth_001.parquet");
+    assert!(split_0.exists(), "Expected pqboth_000.parquet to exist");
+    assert!(split_1.exists(), "Expected pqboth_001.parquet to exist");
+
+    teardown_schema(&schema);
+}
+
+#[test]
+fn export_parquet_file_size_human_units() {
+    fixtures::require_exasol!();
+    let schema = setup_schema("exp_pq_units");
+    setup_table(&schema, "test_data");
+
+    let dir = tempfile::tempdir().unwrap();
+
+    for (suffix, size_value) in [
+        ("kb", "1KB"),
+        ("mb", "1MB"),
+        ("gb", "1GB"),
+        ("bytes", "5000"),
+    ] {
+        let output = dir.path().join(format!("units_{suffix}.parquet"));
+
+        fixtures::exapump()
+            .env("EXAPUMP_DSN", fixtures::DOCKER_DSN)
+            .args([
+                "export",
+                "--table",
+                &format!("{schema}.test_data"),
+                "--output",
+                output.to_str().unwrap(),
+                "--format",
+                "parquet",
+                "--max-file-size",
+                size_value,
+            ])
+            .assert()
+            .success()
+            .stderr(predicate::str::contains("file(s)"));
+    }
+
+    teardown_schema(&schema);
+}
+
+#[test]
+fn export_compression_rejected_for_csv() {
+    let dir = tempfile::tempdir().unwrap();
+    let output = dir.path().join("rejected.csv");
+
+    fixtures::exapump()
+        .args([
+            "export",
+            "--query",
+            "SELECT 1 AS n",
+            "--output",
+            output.to_str().unwrap(),
+            "--format",
+            "csv",
+            "--compression",
+            "snappy",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "compression is only supported for Parquet",
+        ));
+}
+
+#[test]
+fn export_parquet_table_not_found() {
+    fixtures::require_exasol!();
+
+    let dir = tempfile::tempdir().unwrap();
+    let output = dir.path().join("notfound.parquet");
+
+    fixtures::exapump()
+        .timeout(std::time::Duration::from_secs(10))
+        .env("EXAPUMP_DSN", fixtures::DOCKER_DSN)
+        .args([
+            "export",
+            "--table",
+            "nonexistent_schema_xyz.nonexistent_table",
+            "--output",
+            output.to_str().unwrap(),
+            "--format",
+            "parquet",
+        ])
+        .assert()
+        .failure();
+}
+
+#[test]
+fn export_parquet_output_not_writable() {
+    fixtures::require_exasol!();
+
+    fixtures::exapump()
+        .env("EXAPUMP_DSN", fixtures::DOCKER_DSN)
+        .args([
+            "export",
+            "--query",
+            "SELECT 1 AS n",
+            "--output",
+            "/nonexistent_dir_xyz/output.parquet",
+            "--format",
+            "parquet",
+        ])
+        .assert()
+        .failure();
 }
