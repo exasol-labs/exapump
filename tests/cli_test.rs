@@ -15,6 +15,7 @@ fn display_top_level_help() {
         .stdout(predicate::str::contains("sql"))
         .stdout(predicate::str::contains("export"))
         .stdout(predicate::str::contains("interactive"))
+        .stdout(predicate::str::contains("profile"))
         .stdout(predicate::str::contains("--help"))
         .stdout(predicate::str::contains("--version"));
 }
@@ -49,6 +50,7 @@ fn upload_help_shows_all_arguments() {
         .stdout(predicate::str::contains("<FILES>"))
         .stdout(predicate::str::contains("--table"))
         .stdout(predicate::str::contains("--dsn"))
+        .stdout(predicate::str::contains("--profile"))
         .stdout(predicate::str::contains("--dry-run"))
         .stdout(predicate::str::contains("--delimiter"))
         .stdout(predicate::str::contains("--no-header"))
@@ -132,6 +134,7 @@ fn sql_help_shows_all_arguments() {
         .success()
         .stdout(predicate::str::contains("[SQL]"))
         .stdout(predicate::str::contains("--dsn"))
+        .stdout(predicate::str::contains("--profile"))
         .stdout(predicate::str::contains("--format"))
         .stdout(predicate::str::contains("csv"))
         .stdout(predicate::str::contains("json"));
@@ -139,12 +142,20 @@ fn sql_help_shows_all_arguments() {
 
 #[test]
 fn sql_missing_dsn() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join("nonexistent_config.toml");
+
     fixtures::exapump()
-        .args(["sql", "SELECT 1"])
+        .env("EXAPUMP_CONFIG", config_path.to_str().unwrap())
         .env_remove("EXAPUMP_DSN")
+        .args(["sql", "SELECT 1"])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("--dsn").or(predicate::str::contains("required")));
+        .stderr(
+            predicate::str::contains("profile add default")
+                .or(predicate::str::contains("--dsn"))
+                .or(predicate::str::contains("No connection")),
+        );
 }
 
 #[test]
@@ -227,6 +238,7 @@ fn export_help_shows_all_arguments() {
         .stdout(predicate::str::contains("--output"))
         .stdout(predicate::str::contains("--format"))
         .stdout(predicate::str::contains("--dsn"))
+        .stdout(predicate::str::contains("--profile"))
         .stdout(predicate::str::contains("--delimiter"))
         .stdout(predicate::str::contains("--quote"))
         .stdout(predicate::str::contains("--no-header"))
@@ -415,6 +427,7 @@ fn interactive_help_shows_all_arguments() {
         .assert()
         .success()
         .stdout(predicate::str::contains("--dsn"))
+        .stdout(predicate::str::contains("--profile"))
         .stdout(
             predicate::str::contains("interactive SQL session")
                 .or(predicate::str::contains("Interactive")),
@@ -423,10 +436,32 @@ fn interactive_help_shows_all_arguments() {
 
 #[test]
 fn interactive_missing_dsn() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join("nonexistent_config.toml");
+
     fixtures::exapump()
-        .args(["interactive"])
+        .env("EXAPUMP_CONFIG", config_path.to_str().unwrap())
         .env_remove("EXAPUMP_DSN")
+        .args(["interactive"])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("--dsn").or(predicate::str::contains("required")));
+        .stderr(
+            predicate::str::contains("profile add default")
+                .or(predicate::str::contains("--dsn"))
+                .or(predicate::str::contains("No connection")),
+        );
+}
+
+// --- Profile subcommand tests ---
+
+#[test]
+fn profile_help_shows_subcommands() {
+    fixtures::exapump()
+        .args(["profile", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("list"))
+        .stdout(predicate::str::contains("show"))
+        .stdout(predicate::str::contains("add"))
+        .stdout(predicate::str::contains("remove"));
 }
