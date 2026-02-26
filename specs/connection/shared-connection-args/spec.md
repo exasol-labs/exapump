@@ -9,7 +9,7 @@ Connection arguments (`--dsn`, `--profile`, and env file loading) are shared acr
 The resolution priority (highest to lowest) is:
 1. `--dsn` CLI flag
 2. `EXAPUMP_DSN` environment variable (shell or `.env` file)
-3. Config file profile (selected via `--profile` or `default` profile)
+3. Config file profile (selected via `--profile` or default profile)
 
 ## Scenarios
 
@@ -92,11 +92,11 @@ The resolution priority (highest to lowest) is:
 
 ### Scenario: DSN not required when profile exists
 
-* *GIVEN* a config file at `~/.exapump/config.toml` with a `[default]` profile
+* *GIVEN* a config file at `~/.exapump/config.toml` with a single profile (any name)
 * *AND* no `--dsn` flag or `EXAPUMP_DSN` env var is provided
 * *WHEN* the user runs any subcommand (upload, sql, export, interactive)
 * *THEN* argument parsing MUST NOT fail due to a missing `--dsn`
-* *AND* the connection MUST be resolved from the `default` profile
+* *AND* the connection MUST be resolved from the auto-selected default profile
 
 ### Scenario: Neither DSN nor profile available
 
@@ -105,4 +105,4 @@ The resolution priority (highest to lowest) is:
 * *AND* no `--profile` flag is provided
 * *WHEN* the user runs any subcommand requiring a connection
 * *THEN* the CLI MUST exit with a non-zero code
-* *AND* stderr MUST suggest how to provide connection info (e.g., `exapump profile add default`)
+* *AND* stderr MUST suggest how to provide connection info (e.g., `exapump profile add <name>`)

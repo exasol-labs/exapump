@@ -8,30 +8,69 @@ The `profile` subcommand is available as `exapump profile`. It does not require 
 
 ## Scenarios
 
+### Scenario: Profile list with no config file
+
+* *GIVEN* no config file exists at `~/.exapump/config.toml`
+* *WHEN* the user runs `exapump profile list`
+* *THEN* the output MUST indicate no profiles are configured
+* *AND* the output SHOULD suggest running `exapump profile add <name>`
+
+### Scenario: Profile list with profiles
+
+* *GIVEN* a config file exists with profiles `local` and `production`
+* *AND* `production` has `default = true`
+* *WHEN* the user runs `exapump profile list`
+* *THEN* the output MUST list `local` and `production`
+* *AND* `production` MUST be annotated with `(default)`
+
+### Scenario: Profile list single profile shows default
+
+* *GIVEN* a config file exists with exactly one profile named `mydb`
+* *AND* `mydb` does not have `default = true`
+* *WHEN* the user runs `exapump profile list`
+* *THEN* the output MUST list `mydb`
+* *AND* `mydb` MUST be annotated with `(default)`
+
+### Scenario: Profile add default with Docker presets
+
+* *GIVEN* no config file exists
+* *WHEN* the user runs `exapump profile add default`
+* *THEN* the config file MUST be created at `~/.exapump/config.toml`
+* *AND* a `[default]` section MUST be written with `host = "localhost"`, `port = 8563`, `user = "sys"`, `password = "exasol"`, `tls = true`, `validate_certificate = false`
+* *AND* stdout MUST confirm the profile was added with the preset values
+
+### Scenario: Profile add refuses to overwrite existing
+
+* *GIVEN* a config file exists with a profile
+* *WHEN* the user runs `exapump profile add <name>` where `<name>` already exists
+* *THEN* the CLI MUST exit with a non-zero code
+* *AND* stderr MUST indicate the profile already exists
+* *AND* stderr SHOULD suggest using `exapump profile remove <name>` first
+
+### Scenario: Profile add with --default flag
+
+* *GIVEN* a config file exists with a profile `local`
+* *WHEN* the user runs `exapump profile add production --host prod.example.com --user admin --password s3cret --default`
+* *THEN* the `[production]` section MUST be written with `default = true`
+* *AND* stdout MUST confirm the profile was added
+
+### Scenario: Profile add --default removes other defaults
+
+* *GIVEN* a config file exists with profile `local` having `default = true`
+* *WHEN* the user runs `exapump profile add production --host prod.example.com --user admin --password s3cret --default`
+* *THEN* the `[production]` section MUST have `default = true`
+* *AND* the `[local]` section MUST have its `default` field removed or set to `false`
+
 ### Scenario: Profile help shows subcommands
 
 * *GIVEN* exapump is installed
 * *WHEN* the user runs `exapump profile --help`
 * *THEN* the output MUST show the `list`, `show`, `add`, and `remove` subcommands
 
-### Scenario: Profile list with no config file
-
-* *GIVEN* no config file exists at `~/.exapump/config.toml`
-* *WHEN* the user runs `exapump profile list`
-* *THEN* the output MUST indicate no profiles are configured
-* *AND* the output SHOULD suggest running `exapump profile add default`
-
-### Scenario: Profile list with profiles
-
-* *GIVEN* a config file exists with profiles `[default]` and `[production]`
-* *WHEN* the user runs `exapump profile list`
-* *THEN* the output MUST list `default` and `production`
-* *AND* the `default` profile MUST be marked as the auto-selected profile
-
 ### Scenario: Profile show displays details
 
-* *GIVEN* a config file exists with a `[default]` profile containing `host = "localhost"`, `port = 8563`, `user = "sys"`, `password = "exasol"`
-* *WHEN* the user runs `exapump profile show default`
+* *GIVEN* a config file exists with a profile containing `host = "localhost"`, `port = 8563`, `user = "sys"`, `password = "exasol"`
+* *WHEN* the user runs `exapump profile show <name>`
 * *THEN* the output MUST show the profile name, host, port, user, TLS setting, and certificate validation setting
 * *AND* the password MUST be masked (e.g., `****`)
 
@@ -50,14 +89,6 @@ The `profile` subcommand is available as `exapump profile`. It does not require 
 * *AND* a `[production]` section MUST be written with the provided values
 * *AND* stdout MUST confirm the profile was added
 
-### Scenario: Profile add default with Docker presets
-
-* *GIVEN* no config file exists
-* *WHEN* the user runs `exapump profile add default`
-* *THEN* the config file MUST be created at `~/.exapump/config.toml`
-* *AND* a `[default]` section MUST be written with `host = "localhost"`, `port = 8563`, `user = "sys"`, `password = "exasol"`, `tls = true`, `validate_certificate = false`
-* *AND* stdout MUST confirm the profile was added with the preset values
-
 ### Scenario: Profile add with partial flags uses defaults
 
 * *GIVEN* no config file exists
@@ -65,20 +96,12 @@ The `profile` subcommand is available as `exapump profile`. It does not require 
 * *THEN* the profile MUST be created with `port = 8563`, `tls = true`, and `validate_certificate = true` as defaults
 * *AND* the explicitly provided `host`, `user`, and `password` MUST be used
 
-### Scenario: Profile add refuses to overwrite existing
-
-* *GIVEN* a config file exists with a `[default]` profile
-* *WHEN* the user runs `exapump profile add default --host newhost --user newuser --password newpass`
-* *THEN* the CLI MUST exit with a non-zero code
-* *AND* stderr MUST indicate the profile already exists
-* *AND* stderr SHOULD suggest using `exapump profile remove default` first
-
 ### Scenario: Profile remove deletes a profile
 
-* *GIVEN* a config file exists with profiles `[default]` and `[production]`
+* *GIVEN* a config file exists with profiles `local` and `production`
 * *WHEN* the user runs `exapump profile remove production`
 * *THEN* the `[production]` section MUST be removed from the config file
-* *AND* the `[default]` section MUST remain unchanged
+* *AND* the `[local]` section MUST remain unchanged
 * *AND* stdout MUST confirm the profile was removed
 
 ### Scenario: Profile remove for missing profile

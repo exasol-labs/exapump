@@ -92,7 +92,7 @@ The REPL uses rustyline for readline-style editing with persistent history. SQL 
 * *AND* the user exits the REPL
 * *AND* the user starts a new REPL session
 * *THEN* the previous statement MUST be accessible via the up-arrow key
-* *AND* history MUST be stored in `~/.exapump_history`
+* *AND* history MUST be stored in `~/.exapump/history`
 
 ### Scenario: Multiple statements on one line
 

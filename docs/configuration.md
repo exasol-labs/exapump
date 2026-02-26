@@ -5,7 +5,7 @@
 exapump stores connection profiles in `~/.exapump/config.toml`. Each TOML section is a named profile:
 
 ```toml
-[default]
+[local]
 host = "localhost"
 port = 8563
 user = "sys"
@@ -21,6 +21,7 @@ password = "s3cret"
 schema = "my_schema"
 tls = true
 validate_certificate = true
+default = true
 ```
 
 ### Profile Fields
@@ -34,6 +35,23 @@ validate_certificate = true
 | `schema` | No | — | Default schema |
 | `tls` | No | `true` | Enable TLS |
 | `validate_certificate` | No | `true` | Validate server TLS certificate |
+| `default` | No | — | Mark this profile as the default (see below) |
+
+## Default Profile
+
+If your config has a single profile, it is automatically used as the default — no extra configuration needed.
+
+With multiple profiles, mark exactly one as the default:
+
+```toml
+[production]
+host = "exasol-prod.example.com"
+user = "admin"
+password = "s3cret"
+default = true
+```
+
+Setting `default = true` on more than one profile is an error.
 
 ## Resolution Priority
 
@@ -42,24 +60,26 @@ When resolving a connection, exapump checks (highest to lowest):
 1. `--dsn` CLI flag
 2. `EXAPUMP_DSN` environment variable (shell or `.env` file)
 3. `--profile <name>` flag (named profile from config file)
-4. `[default]` profile from config file
+4. Single profile in config (auto-default)
+5. Profile with `default = true`
 
-If none are available, the CLI exits with an error suggesting `exapump profile add default`.
+If none are available, the CLI exits with an error.
 
 ## Profile Management
 
 ```bash
-# Add the default profile (Docker presets)
-exapump profile add default
+# Add a profile with Docker presets
+exapump profile add local
 
-# Add a custom profile
+# Add a custom profile and mark it as the default
 exapump profile add production \
   --host exasol-prod.example.com \
   --user admin \
   --password s3cret \
-  --schema my_schema
+  --schema my_schema \
+  --default
 
-# List all profiles (* marks auto-selected)
+# List all profiles ((default) marks the active default)
 exapump profile list
 
 # Show profile details (password masked)
@@ -71,7 +91,7 @@ exapump profile remove production
 
 ## Docker Presets
 
-Running `exapump profile add default` without flags creates a profile pre-configured for the standard Exasol Docker container:
+Running `exapump profile add <name>` without connection flags creates a profile pre-configured for the standard Exasol Docker container:
 
 - `host = "localhost"`
 - `port = 8563`
