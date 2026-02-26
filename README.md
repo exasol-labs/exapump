@@ -34,7 +34,7 @@ Windows users: grab the `.exe` from the [latest release](https://github.com/exas
 For a local Docker container (default presets):
 
 ```bash
-exapump profile add local
+exapump profile add default
 ```
 
 For a custom server (use `--default` to mark it as the default profile):
@@ -65,7 +65,7 @@ No `--dsn` needed — exapump uses your default profile automatically.
 
 exapump resolves connections in this order:
 
-- **Profile** (recommended): `exapump profile add local`, then run commands directly
+- **Profile** (recommended): `exapump profile add default`, then run commands directly
 - **DSN flag**: `--dsn exasol://user:pwd@host:8563`
 - **Environment variable**: `EXAPUMP_DSN=exasol://user:pwd@host:8563`
 
