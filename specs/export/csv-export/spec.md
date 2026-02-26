@@ -26,6 +26,15 @@ exapump connects to Exasol via exarrow-rs using the DSN provided by `--dsn` or `
 * *AND* stderr MUST print the number of rows exported
 * *AND* the command MUST exit with code 0
 
+### Scenario: Query with WHERE clause exports only matching rows to CSV
+
+* *GIVEN* a table with 3 rows exists in Exasol (ids 1, 2, 3)
+* *WHEN* the user runs `exapump export --query 'SELECT * FROM schema.table WHERE id > 1' --output filtered.csv --format csv --dsn <dsn>`
+* *THEN* the command MUST write only the 2 matching rows to `filtered.csv`
+* *AND* the first row of the output file MUST contain column headers
+* *AND* stderr MUST print the number of rows exported
+* *AND* the command MUST exit with code 0
+
 ### Scenario: Table and query are mutually exclusive
 
 * *GIVEN* exapump is installed
