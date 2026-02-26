@@ -162,6 +162,13 @@ The resolution priority (highest to lowest) is:
 * *AND* `tls` MUST map to the `tls` query parameter
 * *AND* `validate_certificate` MUST map to the `validateservercertificate` query parameter (`1` for true, `0` for false)
 
+### Scenario: First profile auto-defaults
+
+* *GIVEN* no config file exists (or config file has zero profiles)
+* *WHEN* the user runs `exapump profile add <name>` without `--default`
+* *THEN* the profile MUST be created with `default = true`
+* *AND* stdout MUST include "(set as default)" to indicate auto-defaulting
+
 ### Scenario: Profile name validation
 
 * *GIVEN* a profile name is provided (via `--profile` flag or `exapump profile add <name>`)

@@ -35,9 +35,9 @@ The `profile` subcommand is available as `exapump profile`. It does not require 
 
 * *GIVEN* no config file exists
 * *WHEN* the user runs `exapump profile add default`
-* *THEN* the config file MUST be created at `~/.exapump/config.toml`
-* *AND* a `[default]` section MUST be written with `host = "localhost"`, `port = 8563`, `user = "sys"`, `password = "exasol"`, `tls = true`, `validate_certificate = false`
-* *AND* stdout MUST confirm the profile was added with the preset values
+* *THEN* a `[default]` section MUST be written with Docker preset values
+* *AND* the profile MUST have `default = true` (auto-defaulted as first profile)
+* *AND* stdout MUST include "(set as default)"
 
 ### Scenario: Profile add refuses to overwrite existing
 
@@ -84,10 +84,10 @@ The `profile` subcommand is available as `exapump profile`. It does not require 
 ### Scenario: Profile add with explicit flags
 
 * *GIVEN* no config file exists
-* *WHEN* the user runs `exapump profile add production --host exasol-prod.example.com --port 8563 --user admin --password s3cret --no-validate-certificate`
-* *THEN* the config file MUST be created at `~/.exapump/config.toml`
-* *AND* a `[production]` section MUST be written with the provided values
-* *AND* stdout MUST confirm the profile was added
+* *WHEN* the user runs `exapump profile add production --host exasol.example.com --user admin --password secret`
+* *THEN* a `[production]` section MUST be written with the provided values
+* *AND* the profile MUST have `default = true` (auto-defaulted as first profile)
+* *AND* stdout MUST include "(set as default)"
 
 ### Scenario: Profile add with partial flags uses defaults
 
