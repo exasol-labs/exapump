@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.1
+
+- Auto-set `default = true` when adding the first profile to an empty config
+- Show "(set as default)" message to inform user of auto-defaulting
+
 ## 0.5.0
 
 - Connection profiles via `~/.exapump/config.toml`
