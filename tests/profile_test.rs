@@ -144,7 +144,16 @@ fn profile_add_default_presets() {
         .stdout(predicate::str::contains("Profile 'default' added"))
         .stdout(predicate::str::contains("host=localhost"))
         .stdout(predicate::str::contains("port=8563"))
-        .stdout(predicate::str::contains("user=sys"));
+        .stdout(predicate::str::contains("user=sys"))
+        .stdout(predicate::str::contains("(set as default)"));
+
+    // First profile into empty config should auto-default
+    let content = std::fs::read_to_string(&config_path).unwrap();
+    assert!(
+        content.contains("default = true"),
+        "first profile should have 'default = true', got:\n{}",
+        content
+    );
 }
 
 #[test]
@@ -471,7 +480,8 @@ fn profile_add_with_default_flag() {
         ])
         .assert()
         .success()
-        .stdout(predicate::str::contains("Profile 'prod' added"));
+        .stdout(predicate::str::contains("Profile 'prod' added"))
+        .stdout(predicate::str::contains("(set as default)"));
 
     // Verify the config file contains default = true
     let content = std::fs::read_to_string(&config_path).unwrap();
@@ -533,8 +543,18 @@ default = true
 #[test]
 fn profile_add_without_default_flag_no_default_field() {
     let dir = tempfile::tempdir().unwrap();
-    let config_path = dir.path().join(".exapump").join("config.toml");
-    std::fs::create_dir_all(config_path.parent().unwrap()).unwrap();
+    // Pre-populate config with one existing profile so auto-default does not fire
+    let config_path = write_config(
+        dir.path(),
+        r#"
+[existing]
+host = "localhost"
+port = 8563
+user = "sys"
+password = "exasol"
+default = true
+"#,
+    );
 
     fixtures::exapump()
         .env("EXAPUMP_CONFIG", config_path.to_str().unwrap())
@@ -552,12 +572,97 @@ fn profile_add_without_default_flag_no_default_field() {
         .assert()
         .success();
 
-    // Verify the config file does NOT contain default field
+    // Verify the new profile does NOT have the default field
+    let content = std::fs::read_to_string(&config_path).unwrap();
+    let config: toml::Table = toml::from_str(&content).unwrap();
+
+    let prod_default = config["prod"].get("default").and_then(|v| v.as_bool());
+    assert_eq!(
+        prod_default, None,
+        "second profile without --default should not have default field, got: {:?}",
+        prod_default
+    );
+}
+
+// ──────────────────────────────────────────────
+// Auto-default first profile tests
+// ──────────────────────────────────────────────
+
+#[test]
+fn profile_add_first_profile_auto_defaults() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join(".exapump").join("config.toml");
+    std::fs::create_dir_all(config_path.parent().unwrap()).unwrap();
+
+    fixtures::exapump()
+        .env("EXAPUMP_CONFIG", config_path.to_str().unwrap())
+        .args([
+            "profile",
+            "add",
+            "mydb",
+            "--host",
+            "mydb.example.com",
+            "--user",
+            "admin",
+            "--password",
+            "s3cret",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Profile 'mydb' added"))
+        .stdout(predicate::str::contains("(set as default)"));
+
+    // Verify the config file contains default = true
     let content = std::fs::read_to_string(&config_path).unwrap();
     assert!(
-        !content.contains("default = true"),
-        "config should not contain 'default = true' when flag not set, got:\n{}",
+        content.contains("default = true"),
+        "first profile should have 'default = true', got:\n{}",
         content
+    );
+}
+
+#[test]
+fn profile_add_second_profile_no_auto_default() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = write_config(
+        dir.path(),
+        r#"
+[existing]
+host = "localhost"
+port = 8563
+user = "sys"
+password = "exasol"
+default = true
+"#,
+    );
+
+    fixtures::exapump()
+        .env("EXAPUMP_CONFIG", config_path.to_str().unwrap())
+        .args([
+            "profile",
+            "add",
+            "staging",
+            "--host",
+            "staging.example.com",
+            "--user",
+            "stager",
+            "--password",
+            "stagepwd",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Profile 'staging' added"))
+        .stdout(predicate::str::contains("(set as default)").not());
+
+    // Verify the config file does NOT contain default = true for staging
+    let content = std::fs::read_to_string(&config_path).unwrap();
+    let config: toml::Table = toml::from_str(&content).unwrap();
+
+    let staging_default = config["staging"].get("default").and_then(|v| v.as_bool());
+    assert_eq!(
+        staging_default, None,
+        "second profile should not have default field, got: {:?}",
+        staging_default
     );
 }
 
