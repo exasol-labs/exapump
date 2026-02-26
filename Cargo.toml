@@ -1,6 +1,6 @@
 [package]
 name = "exapump"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2021"
 description = "The simplest path from file to Exasol table — a single-binary CLI for CSV and Parquet ingest."
 license = "MIT"
