@@ -137,7 +137,12 @@ fn add(name: &str, overrides: ProfileOverrides, set_default: bool) -> anyhow::Re
         );
     }
 
-    let default_field = if set_default { Some(true) } else { None };
+    let auto_defaulted = !set_default && config.is_empty();
+    let default_field = if set_default || auto_defaulted {
+        Some(true)
+    } else {
+        None
+    };
 
     let profile = if name == "default" {
         // For "default", use Docker presets as base and override with any provided flags
@@ -183,14 +188,20 @@ fn add(name: &str, overrides: ProfileOverrides, set_default: bool) -> anyhow::Re
         }
     }
 
+    let default_suffix = if set_default || auto_defaulted {
+        " (set as default)"
+    } else {
+        ""
+    };
     println!(
-        "Profile '{}' added (host={}, port={}, user={}, tls={}, validate_certificate={})",
+        "Profile '{}' added (host={}, port={}, user={}, tls={}, validate_certificate={}){}",
         name,
         profile.host,
         profile.port.unwrap_or(config::DEFAULT_PORT),
         profile.user,
         profile.tls.unwrap_or(true),
         profile.validate_certificate.unwrap_or(true),
+        default_suffix,
     );
 
     config.insert(name.to_string(), profile);
