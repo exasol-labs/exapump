@@ -18,6 +18,8 @@ pub enum Commands {
     Export(ExportArgs),
     /// Start an interactive SQL session
     Interactive(InteractiveArgs),
+    /// Manage connection profiles
+    Profile(crate::commands::profile::ProfileArgs),
 }
 
 #[derive(clap::Args)]

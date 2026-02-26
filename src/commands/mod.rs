@@ -1,5 +1,6 @@
 pub mod export;
 pub mod interactive;
+pub mod profile;
 pub mod sql;
 pub mod upload;
 
