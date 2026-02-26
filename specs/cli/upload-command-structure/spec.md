@@ -1,10 +1,10 @@
 # Feature: Upload Command Structure
 
-The `upload` subcommand defines the argument interface for loading files into Exasol. It accepts file paths, a target table, a connection string, and format-specific options. All arguments are parsed via clap derive macros.
+The upload command is the primary entrypoint for data ingestion. It accepts file paths, a target table, and a connection string. All arguments are parsed via clap derive macros.
 
 ## Background
 
-The upload command is the primary entrypoint for data ingestion. It accepts file paths, a target table, and a connection string. All arguments are parsed via clap derive macros.
+The upload command is available as `exapump upload`. Connection arguments are provided via the shared `ConnectionArgs` flattened into `UploadArgs`.
 
 ## Scenarios
 
@@ -15,6 +15,7 @@ The upload command is the primary entrypoint for data ingestion. It accepts file
 * *THEN* the output MUST show a positional `<FILES>` argument
 * *AND* the output MUST show a `--table` option
 * *AND* the output MUST show a `--dsn` option
+* *AND* the output MUST show a `--profile` option
 * *AND* the output MUST show a `--dry-run` flag
 * *AND* the output MUST show a `--delimiter` option
 * *AND* the output MUST show a `--no-header` flag
@@ -32,7 +33,7 @@ The upload command is the primary entrypoint for data ingestion. It accepts file
 ### Scenario: DSN from environment variable
 
 * *GIVEN* the `EXAPUMP_DSN` environment variable is set (via shell or `.env` file)
-* *WHEN* the user runs `exapump upload data.parquet --table my_table` without `--dsn`
+* *WHEN* the user runs `exapump upload <files> --table <table>` without `--dsn`
 * *THEN* the CLI MUST accept the DSN from the environment variable
 
 ### Scenario: DSN flag overrides environment variable
@@ -45,7 +46,7 @@ The upload command is the primary entrypoint for data ingestion. It accepts file
 ### Scenario: CSV flags ignored for Parquet files
 
 * *GIVEN* a Parquet file exists at the specified path
-* *WHEN* the user runs `exapump upload data.parquet --table schema.table --dsn <dsn> --delimiter ';'`
+* *WHEN* the user runs `exapump upload <file> --table <table> --delimiter ';'`
 * *THEN* the command MUST ignore the `--delimiter` flag
 * *AND* the command MUST proceed with Parquet import as normal
 
