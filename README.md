@@ -19,9 +19,9 @@ Based on [exarrow-rs](https://github.com/exasol-labs/exarrow-rs) — an ADBC dri
 
 ---
 
-## Install
+## Quick Start
 
-Get started right away:
+**1. Install**
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/exasol-labs/exapump/main/install.sh | sh
@@ -29,65 +29,46 @@ curl -fsSL https://raw.githubusercontent.com/exasol-labs/exapump/main/install.sh
 
 Windows users: grab the `.exe` from the [latest release](https://github.com/exasol-labs/exapump/releases/latest).
 
-## Quick Start
+**2. Set up a connection**
 
-**Import** CSV or Parquet files into an Exasol table:
-
-```bash
-exapump upload data.csv \
-  --table schema.my_table \
-  --dsn exasol://user:pwd@host:8563
-
-exapump upload data.parquet \
-  --table schema.my_table \
-  --dsn exasol://user:pwd@host:8563
-```
-
-**Export** a table or query result to CSV:
+For a local Docker container (default presets):
 
 ```bash
-exapump export \
-  --table schema.my_table \
-  --output data.csv \
-  --format csv \
-  --dsn exasol://user:pwd@host:8563
-
-exapump export \
-  --query 'SELECT * FROM t WHERE id > 100' \
-  --output results.csv \
-  --format csv \
-  --dsn exasol://user:pwd@host:8563
+exapump profile add default
 ```
 
-**Run SQL** statements directly:
+For a custom server:
 
 ```bash
-exapump sql 'SELECT count(*) FROM my_table' \
-  --dsn exasol://user:pwd@host:8563
+exapump profile add mydb \
+  --host exasol-prod.example.com \
+  --user admin \
+  --password s3cret \
+  --schema my_schema
 ```
 
-**Interactive SQL session** with table-formatted output:
+**3. Run a command**
 
 ```bash
-exapump interactive --dsn exasol://user:pwd@host:8563
-
-exapump> SELECT * FROM schema.users LIMIT 3;
-┌───────┬─────┐
-│ name  │ age │
-├───────┼─────┤
-│ Alice │ 30  │
-│ Bob   │ 25  │
-└───────┴─────┘
-2 rows
-
-exapump> .format csv
-Output format: csv
-
-exapump> .exit
-Bye!
+exapump sql 'SELECT 1'
+exapump upload data.csv --table schema.my_table
+exapump export --table schema.my_table --output data.csv --format csv
+exapump interactive
 ```
 
-Connection details can also be provided via environment variables (`EXAPUMP_DSN`) or a `.env` file.
+No `--dsn` needed — exapump uses your default profile automatically.
+
+---
+
+## Connection
+
+exapump resolves connections in this order:
+
+- **Profile** (recommended): `exapump profile add default`, then run commands directly
+- **DSN flag**: `--dsn exasol://user:pwd@host:8563`
+- **Environment variable**: `EXAPUMP_DSN=exasol://user:pwd@host:8563`
+
+See [docs/configuration.md](docs/configuration.md) for full details.
 
 ---
 
@@ -96,9 +77,10 @@ Connection details can also be provided via environment variables (`EXAPUMP_DSN`
 | Command | Description |
 |---------|-------------|
 | `upload` | Upload CSV or Parquet files to an Exasol table (auto-creates table if needed) |
-| `export` | Export an Exasol table or query result to a CSV file |
+| `export` | Export an Exasol table or query result to a CSV or Parquet file |
 | `sql` | Execute SQL statements and print results (CSV or JSON) |
 | `interactive` | Start an interactive SQL session with table/CSV/JSON output |
+| `profile` | Manage connection profiles (add, list, show, remove) |
 
 Run `exapump <command> --help` for full argument details.
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.0
+
+- Connection profiles via `~/.exapump/config.toml`
+- `exapump profile add|list|show|remove` commands
+- `--profile` / `-p` flag on all connection commands
+- Docker presets via `exapump profile add default`
+
 ## 0.4.1
 
 - Bump exarrow-rs to 0.6.1 (fix hanging on missing schema)
