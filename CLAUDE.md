@@ -11,3 +11,7 @@ Integration and manual tests must always run against a local Exasol Docker datab
   ```
 - **DSN must use:** `tls=true&validateservercertificate=0`
 - Tests must **fail** (not skip) if Exasol is unavailable
+
+## Licenses
+
+When adding a new dependency, check its license. If the license is not already in the allowed lists, add it to **both** `deny.toml` (`[licenses].allow`) and `about.toml` (`accepted`). These two files must stay in sync.
