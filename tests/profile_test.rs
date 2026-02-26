@@ -293,7 +293,7 @@ fn default_profile_auto_selected() {
         dir.path(),
         r#"
 [default]
-host = "localhost"
+host = "unreachable.example.com"
 port = 8563
 user = "sys"
 password = "exasol"
