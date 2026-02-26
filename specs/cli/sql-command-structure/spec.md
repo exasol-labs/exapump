@@ -4,7 +4,7 @@ The `sql` subcommand executes one or more SQL statements against an Exasol datab
 
 ## Background
 
-The `sql` subcommand is available as `exapump sql`. Connection arguments (`--dsn` / `EXAPUMP_DSN`) are provided via the shared `ConnectionArgs` flattened into `SqlArgs`.
+The `sql` subcommand is available as `exapump sql`. Connection arguments (`--dsn`, `--profile` / `EXAPUMP_DSN`) are provided via the shared `ConnectionArgs` flattened into `SqlArgs`.
 
 ## Scenarios
 
@@ -14,6 +14,7 @@ The `sql` subcommand is available as `exapump sql`. Connection arguments (`--dsn
 * *WHEN* the user runs `exapump sql --help`
 * *THEN* the output MUST show a positional `<SQL>` argument
 * *AND* the output MUST show a `--dsn` option
+* *AND* the output MUST show a `--profile` option
 * *AND* the output MUST show a `--format` option
 * *AND* the output MUST describe `csv` and `json` as format choices
 
@@ -47,14 +48,15 @@ The `sql` subcommand is available as `exapump sql`. Connection arguments (`--dsn
 * *THEN* the CLI MUST exit with a non-zero code
 * *AND* the stderr MUST indicate the SQL argument is required
 
-### Scenario: Missing DSN
+### Scenario: Missing DSN and no profile
 
 * *GIVEN* exapump is installed
 * *AND* the `EXAPUMP_DSN` environment variable is not set
 * *AND* no `.env` file is present
-* *WHEN* the user runs `exapump sql 'SELECT 1'` without `--dsn`
+* *AND* no config file profile exists
+* *WHEN* the user runs `exapump sql 'SELECT 1'` without `--dsn` or `--profile`
 * *THEN* the CLI MUST exit with a non-zero code
-* *AND* the stderr MUST indicate the DSN is required
+* *AND* the stderr MUST indicate that no connection info is available
 
 ### Scenario: DSN from environment variable
 

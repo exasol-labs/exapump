@@ -17,6 +17,7 @@ exapump is invoked as a single binary from the command line. All subcommands and
 * *AND* the output MUST list the `sql` subcommand
 * *AND* the output MUST list the `export` subcommand
 * *AND* the output MUST list the `interactive` subcommand
+* *AND* the output MUST list the `profile` subcommand
 * *AND* the output MUST show the `--help` and `--version` flags
 
 ### Scenario: Display version
@@ -33,4 +34,5 @@ exapump is invoked as a single binary from the command line. All subcommands and
 * *AND* the output MUST list the `export` subcommand
 * *AND* the output MUST list the `sql` subcommand
 * *AND* the output MUST list the `interactive` subcommand
+* *AND* the output MUST list the `profile` subcommand
 * *AND* the exit code SHOULD be non-zero

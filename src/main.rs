@@ -1,5 +1,6 @@
 mod cli;
 mod commands;
+mod config;
 mod connection;
 mod format;
 mod size;
@@ -28,6 +29,9 @@ async fn main() -> anyhow::Result<()> {
         }
         Some(Commands::Interactive(args)) => {
             commands::interactive::run(args).await?;
+        }
+        Some(Commands::Profile(args)) => {
+            commands::profile::run(args)?;
         }
         None => {
             let mut cmd = <Cli as clap::CommandFactory>::command();

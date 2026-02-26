@@ -4,7 +4,12 @@ All subcommands that connect to Exasol share a common set of connection argument
 
 ## Background
 
-Connection arguments (`--dsn` and env file loading) are shared across the `upload`, `export`, and `sql` subcommands. The `.env` file is loaded before clap parses arguments, so that `env = "EXAPUMP_DSN"` picks up values from both the `.env` file and the shell environment.
+Connection arguments (`--dsn`, `--profile`, and env file loading) are shared across the `upload`, `export`, `sql`, and `interactive` subcommands. The `.env` file is loaded before clap parses arguments, so that `env = "EXAPUMP_DSN"` picks up values from both the `.env` file and the shell environment. The `--dsn` flag is now optional — if omitted, connection parameters are resolved from a config file profile.
+
+The resolution priority (highest to lowest) is:
+1. `--dsn` CLI flag
+2. `EXAPUMP_DSN` environment variable (shell or `.env` file)
+3. Config file profile (selected via `--profile` or default profile)
 
 ## Scenarios
 
@@ -13,6 +18,7 @@ Connection arguments (`--dsn` and env file loading) are shared across the `uploa
 * *GIVEN* exapump is installed
 * *WHEN* the user runs `exapump upload --help`
 * *THEN* the output MUST show a `--dsn` option
+* *AND* the output MUST show a `--profile` option (short form `-p`)
 * *AND* the `--dsn` option MUST accept `EXAPUMP_DSN` as an environment variable source
 
 ### Scenario: ConnectionArgs is flattened into sql
@@ -20,6 +26,23 @@ Connection arguments (`--dsn` and env file loading) are shared across the `uploa
 * *GIVEN* exapump is installed
 * *WHEN* the user runs `exapump sql --help`
 * *THEN* the output MUST show a `--dsn` option
+* *AND* the output MUST show a `--profile` option (short form `-p`)
+* *AND* the `--dsn` option MUST accept `EXAPUMP_DSN` as an environment variable source
+
+### Scenario: ConnectionArgs is flattened into export
+
+* *GIVEN* exapump is installed
+* *WHEN* the user runs `exapump export --help`
+* *THEN* the output MUST show a `--dsn` option
+* *AND* the output MUST show a `--profile` option (short form `-p`)
+* *AND* the `--dsn` option MUST accept `EXAPUMP_DSN` as an environment variable source
+
+### Scenario: ConnectionArgs is flattened into interactive
+
+* *GIVEN* exapump is installed
+* *WHEN* the user runs `exapump interactive --help`
+* *THEN* the output MUST show a `--dsn` option
+* *AND* the output MUST show a `--profile` option (short form `-p`)
 * *AND* the `--dsn` option MUST accept `EXAPUMP_DSN` as an environment variable source
 
 ### Scenario: Env file auto-loaded from working directory
@@ -59,10 +82,27 @@ Connection arguments (`--dsn` and env file loading) are shared across the `uploa
 * *THEN* all variables from the `.env` file MUST be loaded into the process environment
 * *AND* the loading MUST NOT be restricted to `EXAPUMP_*` variables only
 
-### Scenario: Connect helper creates connection from DSN
+### Scenario: Connect helper creates connection from DSN or profile
 
-* *GIVEN* a resolved DSN string from `ConnectionArgs`
+* *GIVEN* a resolved DSN string from `ConnectionArgs` (via `--dsn` flag, environment variable, or config file profile)
 * *WHEN* the `connect()` helper is called
-* *THEN* it MUST parse the DSN via `ConnectionParams::from_str()`
+* *THEN* it MUST parse the DSN via the exarrow-rs driver
 * *AND* it MUST return a connected `Connection` ready for use
 * *AND* connection errors MUST propagate as `anyhow::Result` errors
+
+### Scenario: DSN not required when profile exists
+
+* *GIVEN* a config file at `~/.exapump/config.toml` with a single profile (any name)
+* *AND* no `--dsn` flag or `EXAPUMP_DSN` env var is provided
+* *WHEN* the user runs any subcommand (upload, sql, export, interactive)
+* *THEN* argument parsing MUST NOT fail due to a missing `--dsn`
+* *AND* the connection MUST be resolved from the auto-selected default profile
+
+### Scenario: Neither DSN nor profile available
+
+* *GIVEN* no config file exists
+* *AND* no `--dsn` flag or `EXAPUMP_DSN` env var is provided
+* *AND* no `--profile` flag is provided
+* *WHEN* the user runs any subcommand requiring a connection
+* *THEN* the CLI MUST exit with a non-zero code
+* *AND* stderr MUST suggest how to provide connection info (e.g., `exapump profile add <name>`)

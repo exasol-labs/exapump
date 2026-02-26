@@ -12,7 +12,7 @@ The export command is the counterpart to upload. It writes data from Exasol to a
 
 * *GIVEN* exapump is installed
 * *WHEN* the user runs `exapump export --help`
-* *THEN* the output MUST show the `--table`, `--query`, `--output`, `--format`, `--dsn`, `--delimiter`, `--quote`, `--no-header`, `--null-value`, `--compression`, `--max-rows-per-file`, and `--max-file-size` options
+* *THEN* the output MUST show the `--table`, `--query`, `--output`, `--format`, `--dsn`, `--profile`, `--delimiter`, `--quote`, `--no-header`, `--null-value`, `--compression`, `--max-rows-per-file`, and `--max-file-size` options
 
 ### Scenario: Format accepts csv and parquet
 
