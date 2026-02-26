@@ -28,16 +28,9 @@ impl ConnectionArgs {
             };
         }
 
-        // Priority 4: "default" profile
-        if let Some(profile) = config.get("default") {
-            return Ok(profile.to_dsn());
-        }
-
-        // Priority 5: nothing available
-        anyhow::bail!(
-            "No connection specified. Use --dsn, set EXAPUMP_DSN, or run:\n\n  \
-             exapump profile add default\n"
-        )
+        // Priority 4: find default profile (auto-default for single profile, or `default = true`)
+        let (_, profile) = crate::config::find_default_profile(&config)?;
+        Ok(profile.to_dsn())
     }
 
     pub async fn connect(&self) -> anyhow::Result<exarrow_rs::Connection> {

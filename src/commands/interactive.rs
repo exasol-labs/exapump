@@ -154,9 +154,12 @@ pub async fn run(args: crate::cli::InteractiveArgs) -> anyhow::Result<()> {
     let mut conn = args.conn.connect().await?;
 
     let mut rl = DefaultEditor::new()?;
-    let history_path = std::env::var("HOME")
-        .map(|h| format!("{}/.exapump_history", h))
-        .unwrap_or_else(|_| ".exapump_history".to_string());
+    let history_path = dirs::home_dir()
+        .map(|h| h.join(".exapump").join("history"))
+        .unwrap_or_else(|| std::path::PathBuf::from(".exapump/history"));
+    if let Some(parent) = history_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
     let _ = rl.load_history(&history_path);
 
     let version = env!("CARGO_PKG_VERSION");

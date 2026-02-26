@@ -29,6 +29,9 @@ pub enum ProfileCommands {
         tls: Option<bool>,
         #[arg(long)]
         validate_certificate: Option<bool>,
+        /// Mark this profile as the default connection
+        #[arg(long)]
+        default: bool,
     },
     /// Remove a profile
     Remove { name: String },
@@ -58,6 +61,7 @@ pub fn run(args: ProfileArgs) -> anyhow::Result<()> {
             schema,
             tls,
             validate_certificate,
+            default,
         } => {
             let overrides = ProfileOverrides {
                 host,
@@ -68,7 +72,7 @@ pub fn run(args: ProfileArgs) -> anyhow::Result<()> {
                 tls,
                 validate_certificate,
             };
-            add(&name, overrides)
+            add(&name, overrides, default)
         }
         ProfileCommands::Remove { name } => remove(&name),
     }
@@ -77,14 +81,19 @@ pub fn run(args: ProfileArgs) -> anyhow::Result<()> {
 fn list() -> anyhow::Result<()> {
     let config = config::load_config()?;
     if config.is_empty() {
-        println!("No profiles configured. Run `exapump profile add default` to get started.");
+        println!("No profiles configured. Run `exapump profile add <name>` to get started.");
         return Ok(());
     }
+
+    let default_name = config::find_default_profile(&config)
+        .ok()
+        .map(|(name, _)| name.clone());
+
     let mut names: Vec<&String> = config.keys().collect();
     names.sort();
     for name in names {
-        if name == "default" {
-            println!("{} *", name);
+        if default_name.as_deref() == Some(name.as_str()) {
+            println!("{} (default)", name);
         } else {
             println!("{}", name);
         }
@@ -109,13 +118,14 @@ fn show(name: &str) -> anyhow::Result<()> {
                 "  validate_certificate: {}",
                 profile.validate_certificate.unwrap_or(true)
             );
+            println!("  default: {}", profile.default.unwrap_or(false));
             Ok(())
         }
         None => anyhow::bail!("Profile '{}' not found", name),
     }
 }
 
-fn add(name: &str, overrides: ProfileOverrides) -> anyhow::Result<()> {
+fn add(name: &str, overrides: ProfileOverrides, set_default: bool) -> anyhow::Result<()> {
     config::validate_profile_name(name)?;
 
     let mut config = config::load_config()?;
@@ -126,6 +136,8 @@ fn add(name: &str, overrides: ProfileOverrides) -> anyhow::Result<()> {
             name
         );
     }
+
+    let default_field = if set_default { Some(true) } else { None };
 
     let profile = if name == "default" {
         // For "default", use Docker presets as base and override with any provided flags
@@ -140,6 +152,7 @@ fn add(name: &str, overrides: ProfileOverrides) -> anyhow::Result<()> {
             validate_certificate: overrides
                 .validate_certificate
                 .or(preset.validate_certificate),
+            default: default_field,
         }
     } else {
         // For non-default profiles, host, user, and password are required
@@ -160,8 +173,15 @@ fn add(name: &str, overrides: ProfileOverrides) -> anyhow::Result<()> {
             schema: overrides.schema,
             tls: overrides.tls,
             validate_certificate: overrides.validate_certificate,
+            default: default_field,
         }
     };
+
+    if set_default {
+        for (_, existing_profile) in config.iter_mut() {
+            existing_profile.default = None;
+        }
+    }
 
     println!(
         "Profile '{}' added (host={}, port={}, user={}, tls={}, validate_certificate={})",

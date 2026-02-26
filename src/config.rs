@@ -15,6 +15,8 @@ pub struct Profile {
     pub schema: Option<String>,
     pub tls: Option<bool>,
     pub validate_certificate: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default: Option<bool>,
 }
 
 impl Profile {
@@ -52,6 +54,7 @@ pub fn docker_preset() -> Profile {
         schema: None,
         tls: Some(true),
         validate_certificate: Some(false),
+        default: None,
     }
 }
 
@@ -102,6 +105,43 @@ pub fn validate_profile_name(name: &str) -> anyhow::Result<()> {
         );
     }
     Ok(())
+}
+
+/// Resolves the default profile from the config.
+///
+/// - If there is exactly one profile, it is auto-selected regardless of name or `default` field.
+/// - If there are multiple profiles, exactly one must have `default = true`.
+/// - Returns an error if no profiles exist, no default is set among multiple, or multiple defaults are found.
+pub fn find_default_profile(config: &Config) -> anyhow::Result<(&String, &Profile)> {
+    match config.len() {
+        0 => anyhow::bail!("No profiles found in config"),
+        1 => {
+            let (name, profile) = config.iter().next().unwrap();
+            Ok((name, profile))
+        }
+        _ => {
+            let defaults: Vec<(&String, &Profile)> = config
+                .iter()
+                .filter(|(_, p)| p.default == Some(true))
+                .collect();
+
+            match defaults.len() {
+                1 => Ok(defaults[0]),
+                0 => anyhow::bail!(
+                    "No default profile set. Use `exapump profile add <name> --default` \
+                     or add `default = true` to a profile in ~/.exapump/config.toml"
+                ),
+                _ => {
+                    let names: Vec<&str> = defaults.iter().map(|(n, _)| n.as_str()).collect();
+                    anyhow::bail!(
+                        "Multiple default profiles found: {}. \
+                         Remove `default = true` from all but one.",
+                        names.join(", ")
+                    )
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -156,6 +196,7 @@ validate_certificate = false
             schema: None,
             tls: Some(true),
             validate_certificate: Some(false),
+            default: None,
         };
 
         let dsn = profile.to_dsn();
@@ -175,6 +216,7 @@ validate_certificate = false
             schema: Some("my_schema".to_string()),
             tls: Some(true),
             validate_certificate: Some(true),
+            default: None,
         };
 
         let dsn = profile.to_dsn();
@@ -195,6 +237,7 @@ validate_certificate = false
             schema: None,
             tls: Some(true),
             validate_certificate: Some(true),
+            default: None,
         };
 
         let dsn = profile.to_dsn();
@@ -211,6 +254,7 @@ validate_certificate = false
             schema: None,
             tls: None,
             validate_certificate: Some(true),
+            default: None,
         };
 
         let dsn = profile.to_dsn();
@@ -227,6 +271,7 @@ validate_certificate = false
             schema: None,
             tls: Some(true),
             validate_certificate: None,
+            default: None,
         };
 
         let dsn = profile.to_dsn();
@@ -243,6 +288,7 @@ validate_certificate = false
             schema: Some("analytics".to_string()),
             tls: Some(false),
             validate_certificate: Some(false),
+            default: None,
         };
 
         let dsn = profile.to_dsn();
@@ -274,5 +320,202 @@ validate_certificate = false
                 name
             );
         }
+    }
+
+    #[test]
+    fn profile_default_field_parsed_from_toml() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_config(
+            dir.path(),
+            r#"
+[prod]
+host = "prod.example.com"
+user = "admin"
+password = "s3cret"
+default = true
+"#,
+        );
+
+        let config = load_config_from(&path).unwrap();
+        let p = config.get("prod").unwrap();
+        assert_eq!(p.default, Some(true));
+    }
+
+    #[test]
+    fn profile_default_field_absent_is_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_config(
+            dir.path(),
+            r#"
+[prod]
+host = "prod.example.com"
+user = "admin"
+password = "s3cret"
+"#,
+        );
+
+        let config = load_config_from(&path).unwrap();
+        let p = config.get("prod").unwrap();
+        assert_eq!(p.default, None);
+    }
+
+    #[test]
+    fn profile_default_field_not_serialized_when_none() {
+        let mut config = Config::new();
+        config.insert(
+            "test".to_string(),
+            Profile {
+                host: "localhost".to_string(),
+                port: None,
+                user: "u".to_string(),
+                password: "p".to_string(),
+                schema: None,
+                tls: None,
+                validate_certificate: None,
+                default: None,
+            },
+        );
+        let toml_str = toml::to_string(&config).unwrap();
+        assert!(!toml_str.contains("default"));
+    }
+
+    #[test]
+    fn docker_preset_has_no_default_field() {
+        let preset = docker_preset();
+        assert_eq!(preset.default, None);
+    }
+
+    #[test]
+    fn find_default_single_profile_auto_default() {
+        let mut config = Config::new();
+        config.insert(
+            "mydb".to_string(),
+            Profile {
+                host: "localhost".to_string(),
+                port: None,
+                user: "u".to_string(),
+                password: "p".to_string(),
+                schema: None,
+                tls: None,
+                validate_certificate: None,
+                default: None,
+            },
+        );
+        let (name, _profile) = find_default_profile(&config).unwrap();
+        assert_eq!(name, "mydb");
+    }
+
+    #[test]
+    fn find_default_multiple_profiles_one_default() {
+        let mut config = Config::new();
+        config.insert(
+            "dev".to_string(),
+            Profile {
+                host: "dev.example.com".to_string(),
+                port: None,
+                user: "u".to_string(),
+                password: "p".to_string(),
+                schema: None,
+                tls: None,
+                validate_certificate: None,
+                default: None,
+            },
+        );
+        config.insert(
+            "prod".to_string(),
+            Profile {
+                host: "prod.example.com".to_string(),
+                port: None,
+                user: "u".to_string(),
+                password: "p".to_string(),
+                schema: None,
+                tls: None,
+                validate_certificate: None,
+                default: Some(true),
+            },
+        );
+        let (name, _profile) = find_default_profile(&config).unwrap();
+        assert_eq!(name, "prod");
+    }
+
+    #[test]
+    fn find_default_multiple_profiles_multiple_defaults_error() {
+        let mut config = Config::new();
+        config.insert(
+            "dev".to_string(),
+            Profile {
+                host: "dev.example.com".to_string(),
+                port: None,
+                user: "u".to_string(),
+                password: "p".to_string(),
+                schema: None,
+                tls: None,
+                validate_certificate: None,
+                default: Some(true),
+            },
+        );
+        config.insert(
+            "prod".to_string(),
+            Profile {
+                host: "prod.example.com".to_string(),
+                port: None,
+                user: "u".to_string(),
+                password: "p".to_string(),
+                schema: None,
+                tls: None,
+                validate_certificate: None,
+                default: Some(true),
+            },
+        );
+        let err = find_default_profile(&config).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("Multiple default profiles found"),
+            "got: {msg}"
+        );
+        assert!(msg.contains("dev"), "got: {msg}");
+        assert!(msg.contains("prod"), "got: {msg}");
+    }
+
+    #[test]
+    fn find_default_multiple_profiles_no_default_error() {
+        let mut config = Config::new();
+        config.insert(
+            "dev".to_string(),
+            Profile {
+                host: "dev.example.com".to_string(),
+                port: None,
+                user: "u".to_string(),
+                password: "p".to_string(),
+                schema: None,
+                tls: None,
+                validate_certificate: None,
+                default: None,
+            },
+        );
+        config.insert(
+            "prod".to_string(),
+            Profile {
+                host: "prod.example.com".to_string(),
+                port: None,
+                user: "u".to_string(),
+                password: "p".to_string(),
+                schema: None,
+                tls: None,
+                validate_certificate: None,
+                default: None,
+            },
+        );
+        let err = find_default_profile(&config).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("No default profile set"), "got: {msg}");
+    }
+
+    #[test]
+    fn find_default_empty_config_error() {
+        let config = Config::new();
+        let err = find_default_profile(&config).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("No profiles"), "got: {msg}");
     }
 }
