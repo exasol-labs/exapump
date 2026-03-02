@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.2
+
+- Bump exarrow-rs to 0.6.3
+
 ## 0.6.1
 
 - Auto-set `default = true` when adding the first profile to an empty config
