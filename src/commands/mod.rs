@@ -1,3 +1,4 @@
+pub mod bucketfs;
 pub mod export;
 pub mod interactive;
 pub mod profile;

@@ -20,6 +20,8 @@ pub enum Commands {
     Interactive(InteractiveArgs),
     /// Manage connection profiles
     Profile(crate::commands::profile::ProfileArgs),
+    /// Interact with BucketFS (list, copy, delete files)
+    Bucketfs(BucketFsArgs),
 }
 
 #[derive(clap::Args)]
@@ -158,4 +160,80 @@ pub struct ExportArgs {
 pub struct InteractiveArgs {
     #[command(flatten)]
     pub conn: crate::connection::ConnectionArgs,
+}
+
+#[derive(clap::Args)]
+pub struct BucketFsArgs {
+    #[command(subcommand)]
+    pub command: BucketfsCommands,
+}
+
+#[derive(clap::Args, Clone)]
+pub struct BfsConnectionOverrides {
+    /// Connection profile name
+    #[arg(long)]
+    pub profile: Option<String>,
+
+    /// BucketFS host override
+    #[arg(long)]
+    pub bfs_host: Option<String>,
+
+    /// BucketFS port override
+    #[arg(long)]
+    pub bfs_port: Option<u16>,
+
+    /// BucketFS bucket override
+    #[arg(long)]
+    pub bfs_bucket: Option<String>,
+
+    /// BucketFS write password override
+    #[arg(long)]
+    pub bfs_write_password: Option<String>,
+
+    /// BucketFS read password override
+    #[arg(long)]
+    pub bfs_read_password: Option<String>,
+
+    /// BucketFS TLS override
+    #[arg(long)]
+    pub bfs_tls: Option<bool>,
+
+    /// BucketFS certificate validation override
+    #[arg(long)]
+    pub bfs_validate_certificate: Option<bool>,
+}
+
+#[derive(Subcommand)]
+pub enum BucketfsCommands {
+    /// List files in a bucket
+    Ls {
+        /// Path within the bucket to list
+        path: Option<String>,
+
+        /// List files recursively
+        #[arg(short, long)]
+        recursive: bool,
+
+        #[command(flatten)]
+        conn: BfsConnectionOverrides,
+    },
+    /// Copy files to/from BucketFS (direction auto-detected)
+    Cp {
+        /// Source path (local file or BucketFS path)
+        source: String,
+
+        /// Destination path (BucketFS path or local file)
+        destination: String,
+
+        #[command(flatten)]
+        conn: BfsConnectionOverrides,
+    },
+    /// Delete a file from BucketFS
+    Rm {
+        /// Path of the file to delete
+        path: String,
+
+        #[command(flatten)]
+        conn: BfsConnectionOverrides,
+    },
 }

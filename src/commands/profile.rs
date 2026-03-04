@@ -7,6 +7,7 @@ pub struct ProfileArgs {
 }
 
 #[derive(clap::Subcommand)]
+#[allow(clippy::large_enum_variant)]
 pub enum ProfileCommands {
     /// List all profiles
     List,
@@ -32,6 +33,27 @@ pub enum ProfileCommands {
         /// Mark this profile as the default connection
         #[arg(long)]
         default: bool,
+        /// BucketFS host (defaults to profile host)
+        #[arg(long)]
+        bfs_host: Option<String>,
+        /// BucketFS HTTPS port (default: 2581)
+        #[arg(long)]
+        bfs_port: Option<u16>,
+        /// BucketFS bucket name (default: "default")
+        #[arg(long)]
+        bfs_bucket: Option<String>,
+        /// BucketFS write password
+        #[arg(long)]
+        bfs_write_password: Option<String>,
+        /// BucketFS read password
+        #[arg(long)]
+        bfs_read_password: Option<String>,
+        /// BucketFS TLS enabled (defaults to profile tls)
+        #[arg(long)]
+        bfs_tls: Option<bool>,
+        /// BucketFS certificate validation (defaults to profile validate_certificate)
+        #[arg(long)]
+        bfs_validate_certificate: Option<bool>,
     },
     /// Remove a profile
     Remove { name: String },
@@ -46,6 +68,13 @@ struct ProfileOverrides {
     schema: Option<String>,
     tls: Option<bool>,
     validate_certificate: Option<bool>,
+    bfs_host: Option<String>,
+    bfs_port: Option<u16>,
+    bfs_bucket: Option<String>,
+    bfs_write_password: Option<String>,
+    bfs_read_password: Option<String>,
+    bfs_tls: Option<bool>,
+    bfs_validate_certificate: Option<bool>,
 }
 
 pub fn run(args: ProfileArgs) -> anyhow::Result<()> {
@@ -62,6 +91,13 @@ pub fn run(args: ProfileArgs) -> anyhow::Result<()> {
             tls,
             validate_certificate,
             default,
+            bfs_host,
+            bfs_port,
+            bfs_bucket,
+            bfs_write_password,
+            bfs_read_password,
+            bfs_tls,
+            bfs_validate_certificate,
         } => {
             let overrides = ProfileOverrides {
                 host,
@@ -71,6 +107,13 @@ pub fn run(args: ProfileArgs) -> anyhow::Result<()> {
                 schema,
                 tls,
                 validate_certificate,
+                bfs_host,
+                bfs_port,
+                bfs_bucket,
+                bfs_write_password,
+                bfs_read_password,
+                bfs_tls,
+                bfs_validate_certificate,
             };
             add(&name, overrides, default)
         }
@@ -119,6 +162,27 @@ fn show(name: &str) -> anyhow::Result<()> {
                 profile.validate_certificate.unwrap_or(true)
             );
             println!("  default: {}", profile.default.unwrap_or(false));
+            if let Some(ref bfs_host) = profile.bfs_host {
+                println!("  bfs_host: {}", bfs_host);
+            }
+            if let Some(bfs_port) = profile.bfs_port {
+                println!("  bfs_port: {}", bfs_port);
+            }
+            if let Some(ref bfs_bucket) = profile.bfs_bucket {
+                println!("  bfs_bucket: {}", bfs_bucket);
+            }
+            if profile.bfs_write_password.is_some() {
+                println!("  bfs_write_password: ****");
+            }
+            if profile.bfs_read_password.is_some() {
+                println!("  bfs_read_password: ****");
+            }
+            if let Some(bfs_tls) = profile.bfs_tls {
+                println!("  bfs_tls: {}", bfs_tls);
+            }
+            if let Some(bfs_validate_certificate) = profile.bfs_validate_certificate {
+                println!("  bfs_validate_certificate: {}", bfs_validate_certificate);
+            }
             Ok(())
         }
         None => anyhow::bail!("Profile '{}' not found", name),
@@ -158,6 +222,13 @@ fn add(name: &str, overrides: ProfileOverrides, set_default: bool) -> anyhow::Re
                 .validate_certificate
                 .or(preset.validate_certificate),
             default: default_field,
+            bfs_host: overrides.bfs_host,
+            bfs_port: overrides.bfs_port,
+            bfs_bucket: overrides.bfs_bucket,
+            bfs_write_password: overrides.bfs_write_password,
+            bfs_read_password: overrides.bfs_read_password,
+            bfs_tls: overrides.bfs_tls,
+            bfs_validate_certificate: overrides.bfs_validate_certificate,
         }
     } else {
         // For non-default profiles, host, user, and password are required
@@ -179,6 +250,13 @@ fn add(name: &str, overrides: ProfileOverrides, set_default: bool) -> anyhow::Re
             tls: overrides.tls,
             validate_certificate: overrides.validate_certificate,
             default: default_field,
+            bfs_host: overrides.bfs_host,
+            bfs_port: overrides.bfs_port,
+            bfs_bucket: overrides.bfs_bucket,
+            bfs_write_password: overrides.bfs_write_password,
+            bfs_read_password: overrides.bfs_read_password,
+            bfs_tls: overrides.bfs_tls,
+            bfs_validate_certificate: overrides.bfs_validate_certificate,
         }
     };
 
