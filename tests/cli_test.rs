@@ -16,6 +16,7 @@ fn display_top_level_help() {
         .stdout(predicate::str::contains("export"))
         .stdout(predicate::str::contains("interactive"))
         .stdout(predicate::str::contains("profile"))
+        .stdout(predicate::str::contains("bucketfs"))
         .stdout(predicate::str::contains("--help"))
         .stdout(predicate::str::contains("--version"));
 }
@@ -38,7 +39,8 @@ fn no_arguments_shows_help() {
         .stdout(predicate::str::contains("upload"))
         .stdout(predicate::str::contains("sql"))
         .stdout(predicate::str::contains("export"))
-        .stdout(predicate::str::contains("interactive"));
+        .stdout(predicate::str::contains("interactive"))
+        .stdout(predicate::str::contains("bucketfs"));
 }
 
 #[test]
@@ -464,4 +466,73 @@ fn profile_help_shows_subcommands() {
         .stdout(predicate::str::contains("show"))
         .stdout(predicate::str::contains("add"))
         .stdout(predicate::str::contains("remove"));
+}
+
+// --- BucketFS subcommand tests ---
+
+#[test]
+fn bucketfs_help_shows_subcommands_and_flags() {
+    fixtures::exapump()
+        .args(["bucketfs", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("ls"))
+        .stdout(predicate::str::contains("cp"))
+        .stdout(predicate::str::contains("rm"));
+
+    // Connection flags are on each subcommand
+    fixtures::exapump()
+        .args(["bucketfs", "ls", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--profile"))
+        .stdout(predicate::str::contains("--bfs-host"))
+        .stdout(predicate::str::contains("--bfs-port"))
+        .stdout(predicate::str::contains("--bfs-bucket"))
+        .stdout(predicate::str::contains("--bfs-write-password"))
+        .stdout(predicate::str::contains("--bfs-read-password"));
+}
+
+#[test]
+fn bucketfs_ls_help_shows_path_and_recursive() {
+    fixtures::exapump()
+        .args(["bucketfs", "ls", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("[PATH]"))
+        .stdout(predicate::str::contains("--recursive"));
+}
+
+#[test]
+fn bucketfs_cp_help_shows_source_and_destination() {
+    fixtures::exapump()
+        .args(["bucketfs", "cp", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("<SOURCE>"))
+        .stdout(predicate::str::contains("<DESTINATION>"));
+}
+
+#[test]
+fn bucketfs_rm_help_shows_path() {
+    fixtures::exapump()
+        .args(["bucketfs", "rm", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("<PATH>"));
+}
+
+#[test]
+fn profile_add_help_includes_bucketfs_flags() {
+    fixtures::exapump()
+        .args(["profile", "add", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--bfs-host"))
+        .stdout(predicate::str::contains("--bfs-port"))
+        .stdout(predicate::str::contains("--bfs-bucket"))
+        .stdout(predicate::str::contains("--bfs-write-password"))
+        .stdout(predicate::str::contains("--bfs-read-password"))
+        .stdout(predicate::str::contains("--bfs-tls"))
+        .stdout(predicate::str::contains("--bfs-validate-certificate"));
 }

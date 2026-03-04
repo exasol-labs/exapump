@@ -885,6 +885,163 @@ default = true
         .stderr(predicate::str::contains("Multiple default profiles found"));
 }
 
+// ──────────────────────────────────────────────
+// BucketFS profile tests
+// ──────────────────────────────────────────────
+
+#[test]
+fn profile_add_with_bucketfs_fields() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join(".exapump").join("config.toml");
+    std::fs::create_dir_all(config_path.parent().unwrap()).unwrap();
+
+    fixtures::exapump()
+        .env("EXAPUMP_CONFIG", config_path.to_str().unwrap())
+        .args([
+            "profile",
+            "add",
+            "bfs-test",
+            "--host",
+            "myhost",
+            "--user",
+            "u",
+            "--password",
+            "p",
+            "--bfs-host",
+            "bfshost",
+            "--bfs-port",
+            "2581",
+            "--bfs-bucket",
+            "mybucket",
+            "--bfs-write-password",
+            "writepw",
+            "--bfs-read-password",
+            "readpw",
+            "--bfs-tls",
+            "false",
+            "--bfs-validate-certificate",
+            "false",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Profile 'bfs-test' added"));
+
+    let content = std::fs::read_to_string(&config_path).unwrap();
+    assert!(content.contains("bfs_host = \"bfshost\""));
+    assert!(content.contains("bfs_port = 2581"));
+    assert!(content.contains("bfs_bucket = \"mybucket\""));
+    assert!(content.contains("bfs_write_password = \"writepw\""));
+    assert!(content.contains("bfs_read_password = \"readpw\""));
+    assert!(content.contains("bfs_tls = false"));
+    assert!(content.contains("bfs_validate_certificate = false"));
+}
+
+#[test]
+fn profile_config_bfs_fields_roundtrip() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = write_config(
+        dir.path(),
+        r#"
+[prod]
+host = "prod.example.com"
+user = "admin"
+password = "s3cret"
+bfs_host = "bfs.example.com"
+bfs_port = 2581
+bfs_bucket = "mybucket"
+bfs_write_password = "writepw"
+bfs_read_password = "readpw"
+bfs_tls = false
+bfs_validate_certificate = false
+"#,
+    );
+
+    fixtures::exapump()
+        .env("EXAPUMP_CONFIG", config_path.to_str().unwrap())
+        .args(["profile", "show", "prod"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("bfs_host: bfs.example.com"))
+        .stdout(predicate::str::contains("bfs_port: 2581"))
+        .stdout(predicate::str::contains("bfs_bucket: mybucket"))
+        .stdout(predicate::str::contains("bfs_write_password: ****"))
+        .stdout(predicate::str::contains("bfs_read_password: ****"))
+        .stdout(predicate::str::contains("bfs_tls: false"))
+        .stdout(predicate::str::contains("bfs_validate_certificate: false"));
+}
+
+#[test]
+fn profile_show_hides_bfs_fields_when_absent() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = write_config(
+        dir.path(),
+        r#"
+[prod]
+host = "prod.example.com"
+user = "admin"
+password = "s3cret"
+"#,
+    );
+
+    fixtures::exapump()
+        .env("EXAPUMP_CONFIG", config_path.to_str().unwrap())
+        .args(["profile", "show", "prod"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("bfs_host").not())
+        .stdout(predicate::str::contains("bfs_port").not())
+        .stdout(predicate::str::contains("bfs_bucket").not())
+        .stdout(predicate::str::contains("bfs_write_password").not())
+        .stdout(predicate::str::contains("bfs_read_password").not())
+        .stdout(predicate::str::contains("bfs_tls").not())
+        .stdout(predicate::str::contains("bfs_validate_certificate").not());
+}
+
+#[test]
+fn profile_docker_preset_excludes_bfs_fields() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join(".exapump").join("config.toml");
+    std::fs::create_dir_all(config_path.parent().unwrap()).unwrap();
+
+    fixtures::exapump()
+        .env("EXAPUMP_CONFIG", config_path.to_str().unwrap())
+        .args(["profile", "add", "default"])
+        .assert()
+        .success();
+
+    let content = std::fs::read_to_string(&config_path).unwrap();
+    assert!(
+        !content.contains("bfs_"),
+        "Docker preset should not contain BFS fields, got:\n{}",
+        content
+    );
+}
+
+#[test]
+fn profile_show_partial_bfs_fields() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = write_config(
+        dir.path(),
+        r#"
+[prod]
+host = "prod.example.com"
+user = "admin"
+password = "s3cret"
+bfs_write_password = "writepw"
+"#,
+    );
+
+    fixtures::exapump()
+        .env("EXAPUMP_CONFIG", config_path.to_str().unwrap())
+        .args(["profile", "show", "prod"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("bfs_write_password: ****"))
+        .stdout(predicate::str::contains("bfs_host").not())
+        .stdout(predicate::str::contains("bfs_port").not())
+        .stdout(predicate::str::contains("bfs_bucket").not());
+}
+
 /// Config with multiple profiles where NONE has `default = true`.
 /// Should error with "No default profile set".
 #[test]
