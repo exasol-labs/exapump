@@ -13,4 +13,5 @@ accepted = [
     "Unicode-3.0",
     "MPL-2.0",
     "OpenSSL",
+    "CDLA-Permissive-2.0",
 ]
