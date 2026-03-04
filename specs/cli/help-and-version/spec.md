@@ -1,10 +1,10 @@
-# Feature: Help and Version Output
+# Feature: Help and Version
 
-The CLI provides standard help and version information so users can discover available commands and verify the installed version.
+The help and version output reflects all available subcommands.
 
 ## Background
 
-exapump is invoked as a single binary from the command line. All subcommands and flags are discoverable via `--help`.
+Top-level help and no-argument output must list all subcommands including `bucketfs`.
 
 ## Scenarios
 
@@ -12,27 +12,10 @@ exapump is invoked as a single binary from the command line. All subcommands and
 
 * *GIVEN* exapump is installed
 * *WHEN* the user runs `exapump --help`
-* *THEN* the output MUST include the program description
-* *AND* the output MUST list the `upload` subcommand
-* *AND* the output MUST list the `sql` subcommand
-* *AND* the output MUST list the `export` subcommand
-* *AND* the output MUST list the `interactive` subcommand
-* *AND* the output MUST list the `profile` subcommand
-* *AND* the output MUST show the `--help` and `--version` flags
-
-### Scenario: Display version
-
-* *GIVEN* exapump is installed
-* *WHEN* the user runs `exapump --version`
-* *THEN* the output MUST include the program name and version number
+* *THEN* the output MUST list `upload`, `sql`, `export`, `interactive`, `profile`, and `bucketfs` as available subcommands
 
 ### Scenario: No arguments shows help
 
 * *GIVEN* exapump is installed
 * *WHEN* the user runs `exapump` with no arguments
-* *THEN* the output MUST display help text
-* *AND* the output MUST list the `export` subcommand
-* *AND* the output MUST list the `sql` subcommand
-* *AND* the output MUST list the `interactive` subcommand
-* *AND* the output MUST list the `profile` subcommand
-* *AND* the exit code SHOULD be non-zero
+* *THEN* the output MUST list `upload`, `sql`, `export`, `interactive`, `profile`, and `bucketfs` as available subcommands
