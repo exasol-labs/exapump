@@ -14,6 +14,7 @@ tls = true
 validate_certificate = false
 
 [production]
+default = true
 host = "exasol-prod.example.com"
 port = 8563
 user = "admin"
@@ -21,7 +22,8 @@ password = "s3cret"
 schema = "my_schema"
 tls = true
 validate_certificate = true
-default = true
+bfs_write_password = "bucketpw"
+bfs_read_password = "bucketpw"
 ```
 
 ### Profile Fields
@@ -36,6 +38,13 @@ default = true
 | `tls` | No | `true` | Enable TLS |
 | `validate_certificate` | No | `true` | Validate server TLS certificate |
 | `default` | No | — | Mark this profile as the default (see below) |
+| `bfs_host` | No | same as `host` | BucketFS hostname |
+| `bfs_port` | No | `2581` | BucketFS port |
+| `bfs_bucket` | No | `default` | BucketFS bucket name |
+| `bfs_write_password` | No | — | BucketFS write password |
+| `bfs_read_password` | No | falls back to `bfs_write_password` | BucketFS read password |
+| `bfs_tls` | No | same as `tls` | Enable TLS for BucketFS |
+| `bfs_validate_certificate` | No | same as `validate_certificate` | Validate BucketFS TLS certificate |
 
 ## Default Profile
 
@@ -64,6 +73,16 @@ When resolving a connection, exapump checks (highest to lowest):
 5. Profile with `default = true`
 
 If none are available, the CLI exits with an error.
+
+### Selecting a Profile
+
+Use `--profile` (or `-p`) on any command to target a specific profile:
+
+```bash
+exapump sql -p production 'SELECT 1'
+exapump upload data.csv --table t --profile staging
+exapump bucketfs ls --profile production
+```
 
 ## Profile Management
 
