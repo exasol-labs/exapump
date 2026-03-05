@@ -14,6 +14,9 @@ use std::time::Duration;
 
 #[tokio::main]
 async fn main() {
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .expect("Failed to install default CryptoProvider");
     let host = std::env::var("EXASOL_HOST").unwrap_or_else(|_| "localhost".into());
     let port = std::env::var("EXASOL_PORT").unwrap_or_else(|_| "8563".into());
     let user = std::env::var("EXASOL_USER").unwrap_or_else(|_| "sys".into());
