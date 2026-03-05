@@ -13,6 +13,10 @@ use cli::{Cli, Commands};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .expect("Failed to install default CryptoProvider");
+
     dotenvy::dotenv().ok();
 
     let cli = Cli::parse();
@@ -32,6 +36,9 @@ async fn main() -> anyhow::Result<()> {
         }
         Some(Commands::Profile(args)) => {
             commands::profile::run(args)?;
+        }
+        Some(Commands::Bucketfs(args)) => {
+            commands::bucketfs::run(args).await?;
         }
         None => {
             let mut cmd = <Cli as clap::CommandFactory>::command();

@@ -4,18 +4,7 @@ Connection profiles allow users to store named sets of connection parameters in 
 
 ## Background
 
-The config file uses TOML format with one section per profile. Each section name is the profile name. Profile names MUST match the pattern `[a-zA-Z0-9][a-zA-Z0-9_-]*` (start with alphanumeric, then alphanumeric, underscore, or hyphen). The config file path is `~/.exapump/config.toml` on all platforms (Windows is WSL-only per project constraints).
-
-**Default profile selection:**
-- If only one profile exists, it is automatically used as the default regardless of its name.
-- If multiple profiles exist, exactly one profile MUST have `default = true`. That profile is used when no `--dsn`, `EXAPUMP_DSN`, or `--profile` is provided.
-- A profile named `default` has no special meaning; the `default` field controls selection.
-
-The resolution priority (highest to lowest) is:
-1. `--dsn` CLI flag
-2. `EXAPUMP_DSN` environment variable (from shell or `.env` file in working directory)
-3. `--profile <name>` flag (explicit profile from config file)
-4. Default profile from config file (sole profile, or the one with `default = true`)
+Connection profiles now optionally include BucketFS connection parameters alongside the existing Exasol database fields. BucketFS reuses the profile's `host`, `tls`, and `validate_certificate` fields by default. The bucket defaults to `"default"` (Exasol's standard bucket name). Only BucketFS-specific overrides and credentials need to be added explicitly.
 
 ## Scenarios
 
@@ -23,28 +12,37 @@ The resolution priority (highest to lowest) is:
 
 * *GIVEN* a config file at `~/.exapump/config.toml`
 * *AND* the file contains:
-  ```toml
-  [local]
-  host = "localhost"
-  port = 8563
-  user = "sys"
-  password = "exasol"
-  tls = true
-  validate_certificate = false
+```toml
+[local]
+host = "localhost"
+port = 8563
+user = "sys"
+password = "exasol"
+tls = true
+validate_certificate = false
+bfs_write_password = "bucketfs_write_pw"
 
-  [production]
-  default = true
-  host = "exasol-prod.example.com"
-  port = 8563
-  user = "admin"
-  password = "s3cret"
-  schema = "my_schema"
-  tls = true
-  validate_certificate = true
-  ```
+[production]
+default = true
+host = "exasol-prod.example.com"
+port = 8563
+user = "admin"
+password = "s3cret"
+schema = "my_schema"
+tls = true
+validate_certificate = true
+bfs_host = "bfs-node.example.com"
+bfs_port = 6583
+bfs_bucket = "data"
+bfs_write_password = "w_secret"
+bfs_read_password = "r_secret"
+bfs_tls = false
+bfs_validate_certificate = false
+```
 * *WHEN* exapump parses the config
-* *THEN* each TOML section MUST be treated as a named profile
-* *AND* each profile MUST support the fields: `host`, `port`, `user`, `password`, `schema`, `tls`, `validate_certificate`, `default`
+* *THEN* each profile MUST support the optional fields: `bfs_host`, `bfs_port`, `bfs_bucket`, `bfs_write_password`, `bfs_read_password`, `bfs_tls`, `bfs_validate_certificate`
+* *AND* profiles without BucketFS fields MUST still be valid
+* *AND* BucketFS fields MUST NOT affect DSN generation for database connections
 
 ### Scenario: Default profile auto-selected
 
@@ -188,3 +186,122 @@ The resolution priority (highest to lowest) is:
 * *GIVEN* profile names such as `-leading-dash`, `_leading-underscore`, `has spaces`, `special!char`, or an empty string
 * *WHEN* used as profile names
 * *THEN* all MUST be rejected with a validation error
+
+### Scenario: BucketFS host falls back to profile host
+
+* *GIVEN* a profile with `host = "myhost"` and no `bfs_host` field
+* *WHEN* a BucketFS command resolves connection parameters from the profile
+* *THEN* the BucketFS host MUST be `myhost`
+
+### Scenario: BucketFS host override
+
+* *GIVEN* a profile with `host = "dbhost"` and `bfs_host = "bfshost"`
+* *WHEN* a BucketFS command resolves connection parameters from the profile
+* *THEN* the BucketFS host MUST be `bfshost`
+
+### Scenario: BucketFS bucket defaults to default
+
+* *GIVEN* a profile with no `bfs_bucket` field
+* *AND* no `--bfs-bucket` flag is provided
+* *WHEN* a BucketFS command resolves connection parameters
+* *THEN* the bucket MUST default to `default`
+
+### Scenario: BucketFS bucket override
+
+* *GIVEN* a profile with `bfs_bucket = "custom"`
+* *WHEN* a BucketFS command resolves connection parameters from the profile
+* *THEN* the bucket MUST be `custom`
+
+### Scenario: BucketFS TLS falls back to profile TLS
+
+* *GIVEN* a profile with `tls = true` and no `bfs_tls` field
+* *WHEN* a BucketFS command resolves connection parameters from the profile
+* *THEN* the BucketFS connection MUST use TLS
+
+### Scenario: BucketFS TLS override
+
+* *GIVEN* a profile with `tls = true` and `bfs_tls = false`
+* *WHEN* a BucketFS command resolves connection parameters from the profile
+* *THEN* the BucketFS connection MUST NOT use TLS
+
+### Scenario: BucketFS validate_certificate falls back to profile
+
+* *GIVEN* a profile with `validate_certificate = false` and no `bfs_validate_certificate` field
+* *WHEN* a BucketFS command resolves connection parameters from the profile
+* *THEN* TLS certificate validation for BucketFS MUST be skipped
+
+### Scenario: BucketFS validate_certificate override
+
+* *GIVEN* a profile with `validate_certificate = false` and `bfs_validate_certificate = true`
+* *WHEN* a BucketFS command resolves connection parameters from the profile
+* *THEN* TLS certificate validation for BucketFS MUST be enabled
+
+### Scenario: Profile with BucketFS builds connection URL
+
+* *GIVEN* a profile with `host = "myhost"`, `tls = true`, `bfs_write_password = "write"`
+* *AND* no `bfs_host`, `bfs_port`, or `bfs_bucket` overrides
+* *WHEN* a BucketFS command resolves connection parameters from the profile
+* *THEN* it MUST connect to `https://myhost:2581/default/`
+
+### Scenario: BucketFS port defaults in profile
+
+* *GIVEN* a profile with `host` set but no `bfs_port`
+* *WHEN* the BucketFS connection is resolved
+* *THEN* the port MUST default to `2581`
+
+### Scenario: Profile add includes BucketFS fields
+
+* *GIVEN* exapump is installed
+* *WHEN* the user runs `exapump profile add myprofile --host h --user u --password p --bfs-write-password w`
+* *THEN* the profile MUST be saved with both database and BucketFS fields
+
+### Scenario: Profile show displays BucketFS fields
+
+* *GIVEN* a profile exists with BucketFS fields
+* *WHEN* the user runs `exapump profile show <name>`
+* *THEN* the output MUST include the BucketFS fields that are set
+* *AND* the `bfs_write_password` and `bfs_read_password` MUST be masked (shown as `***`)
+
+### Scenario: Docker preset excludes BucketFS
+
+* *GIVEN* exapump is installed
+* *WHEN* the user runs `exapump profile add docker`
+* *THEN* the docker preset MUST NOT include BucketFS fields
+* *AND* the profile MUST still be valid for database operations
+
+### Scenario: Read auth prefers read_password then write_password then anonymous
+
+* *GIVEN* a profile with `bfs_read_password = "rp"` and `bfs_write_password = "wp"`
+* *WHEN* a BucketFS read operation resolves credentials
+* *THEN* it MUST use `r:rp` for authentication
+
+### Scenario: Read auth falls back to write_password
+
+* *GIVEN* a profile with `bfs_write_password = "wp"` and no `bfs_read_password`
+* *WHEN* a BucketFS read operation resolves credentials
+* *THEN* it MUST use `w:wp` for authentication
+
+### Scenario: Read auth falls back to anonymous on public bucket
+
+* *GIVEN* a profile with no `bfs_write_password` and no `bfs_read_password`
+* *AND* the bucket is publicly readable
+* *WHEN* the user runs `exapump bucketfs ls`
+* *THEN* the request MUST be sent without authentication
+* *AND* the operation MUST succeed
+
+### Scenario: Anonymous read fails on non-public bucket
+
+* *GIVEN* a profile with no `bfs_write_password` and no `bfs_read_password`
+* *AND* the bucket is not publicly readable
+* *WHEN* the user runs `exapump bucketfs ls`
+* *THEN* the CLI MUST exit with a non-zero code
+* *AND* stderr MUST indicate access was denied
+* *AND* stderr MUST suggest adding `bfs_read_password` or `bfs_write_password` to the profile
+
+### Scenario: Write password required for write operations
+
+* *GIVEN* a profile without `bfs_write_password`
+* *AND* no `--bfs-write-password` flag is provided
+* *WHEN* the user runs a BucketFS write operation (`cp` upload or `rm`)
+* *THEN* the CLI MUST exit with a non-zero code
+* *AND* stderr MUST indicate that `bfs_write_password` is required for write operations

@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 pub const DEFAULT_PORT: u16 = 8563;
+pub const DEFAULT_BFS_PORT: u16 = 2581;
 
 pub type Config = BTreeMap<String, Profile>;
 
@@ -17,9 +18,62 @@ pub struct Profile {
     pub validate_certificate: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bfs_host: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bfs_port: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bfs_bucket: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bfs_write_password: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bfs_read_password: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bfs_tls: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bfs_validate_certificate: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct BfsConnection {
+    pub host: String,
+    pub port: u16,
+    pub bucket: String,
+    pub write_password: Option<String>,
+    pub read_password: Option<String>,
+    pub tls: bool,
+    pub validate_certificate: bool,
 }
 
 impl Profile {
+    pub fn resolve_bfs_connection(&self) -> BfsConnection {
+        let host = self.bfs_host.clone().unwrap_or_else(|| self.host.clone());
+        let port = self.bfs_port.unwrap_or(DEFAULT_BFS_PORT);
+        let bucket = self
+            .bfs_bucket
+            .clone()
+            .unwrap_or_else(|| "default".to_string());
+        let write_password = self.bfs_write_password.clone();
+        let read_password = self
+            .bfs_read_password
+            .clone()
+            .or_else(|| self.bfs_write_password.clone());
+        let tls = self.bfs_tls.unwrap_or_else(|| self.tls.unwrap_or(true));
+        let validate_certificate = self
+            .bfs_validate_certificate
+            .unwrap_or_else(|| self.validate_certificate.unwrap_or(true));
+
+        BfsConnection {
+            host,
+            port,
+            bucket,
+            write_password,
+            read_password,
+            tls,
+            validate_certificate,
+        }
+    }
+
     pub fn to_dsn(&self) -> String {
         let port = self.port.unwrap_or(DEFAULT_PORT);
         let tls = self.tls.unwrap_or(true);
@@ -55,6 +109,13 @@ pub fn docker_preset() -> Profile {
         tls: Some(true),
         validate_certificate: Some(false),
         default: None,
+        bfs_host: None,
+        bfs_port: None,
+        bfs_bucket: None,
+        bfs_write_password: None,
+        bfs_read_password: None,
+        bfs_tls: None,
+        bfs_validate_certificate: None,
     }
 }
 
@@ -158,6 +219,207 @@ mod tests {
         path
     }
 
+    fn profile_with_all_bfs_fields() -> Profile {
+        Profile {
+            host: "myhost".to_string(),
+            port: Some(8563),
+            user: "u".to_string(),
+            password: "p".to_string(),
+            schema: None,
+            tls: Some(true),
+            validate_certificate: Some(true),
+            default: None,
+            bfs_host: Some("bfshost".to_string()),
+            bfs_port: Some(2581),
+            bfs_bucket: Some("mybucket".to_string()),
+            bfs_write_password: Some("writepw".to_string()),
+            bfs_read_password: Some("readpw".to_string()),
+            bfs_tls: Some(false),
+            bfs_validate_certificate: Some(false),
+        }
+    }
+
+    fn minimal_profile() -> Profile {
+        Profile {
+            host: "myhost".to_string(),
+            port: None,
+            user: "u".to_string(),
+            password: "p".to_string(),
+            schema: None,
+            tls: None,
+            validate_certificate: None,
+            default: None,
+            bfs_host: None,
+            bfs_port: None,
+            bfs_bucket: None,
+            bfs_write_password: None,
+            bfs_read_password: None,
+            bfs_tls: None,
+            bfs_validate_certificate: None,
+        }
+    }
+
+    #[test]
+    fn bfs_fields_parsed_from_toml() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_config(
+            dir.path(),
+            r#"
+[prod]
+host = "prod.example.com"
+user = "admin"
+password = "s3cret"
+bfs_host = "bfs.example.com"
+bfs_port = 2581
+bfs_bucket = "mybucket"
+bfs_write_password = "writepw"
+bfs_read_password = "readpw"
+bfs_tls = false
+bfs_validate_certificate = false
+"#,
+        );
+
+        let config = load_config_from(&path).unwrap();
+        let p = config.get("prod").unwrap();
+        assert_eq!(p.bfs_host, Some("bfs.example.com".to_string()));
+        assert_eq!(p.bfs_port, Some(2581));
+        assert_eq!(p.bfs_bucket, Some("mybucket".to_string()));
+        assert_eq!(p.bfs_write_password, Some("writepw".to_string()));
+        assert_eq!(p.bfs_read_password, Some("readpw".to_string()));
+        assert_eq!(p.bfs_tls, Some(false));
+        assert_eq!(p.bfs_validate_certificate, Some(false));
+    }
+
+    #[test]
+    fn bfs_fields_absent_are_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_config(
+            dir.path(),
+            r#"
+[prod]
+host = "prod.example.com"
+user = "admin"
+password = "s3cret"
+"#,
+        );
+
+        let config = load_config_from(&path).unwrap();
+        let p = config.get("prod").unwrap();
+        assert_eq!(p.bfs_host, None);
+        assert_eq!(p.bfs_port, None);
+        assert_eq!(p.bfs_bucket, None);
+        assert_eq!(p.bfs_write_password, None);
+        assert_eq!(p.bfs_read_password, None);
+        assert_eq!(p.bfs_tls, None);
+        assert_eq!(p.bfs_validate_certificate, None);
+    }
+
+    #[test]
+    fn bfs_fields_not_serialized_when_none() {
+        let mut config = Config::new();
+        config.insert("test".to_string(), minimal_profile());
+        let toml_str = toml::to_string(&config).unwrap();
+        assert!(!toml_str.contains("bfs_"));
+    }
+
+    #[test]
+    fn docker_preset_has_no_bfs_fields() {
+        let preset = docker_preset();
+        assert_eq!(preset.bfs_host, None);
+        assert_eq!(preset.bfs_port, None);
+        assert_eq!(preset.bfs_bucket, None);
+        assert_eq!(preset.bfs_write_password, None);
+        assert_eq!(preset.bfs_read_password, None);
+        assert_eq!(preset.bfs_tls, None);
+        assert_eq!(preset.bfs_validate_certificate, None);
+    }
+
+    #[test]
+    fn resolve_bfs_connection_all_bfs_fields_set() {
+        let profile = profile_with_all_bfs_fields();
+        let conn = profile.resolve_bfs_connection();
+        assert_eq!(conn.host, "bfshost");
+        assert_eq!(conn.port, 2581);
+        assert_eq!(conn.bucket, "mybucket");
+        assert_eq!(conn.write_password, Some("writepw".to_string()));
+        assert_eq!(conn.read_password, Some("readpw".to_string()));
+        assert!(!conn.tls);
+        assert!(!conn.validate_certificate);
+    }
+
+    #[test]
+    fn resolve_bfs_connection_falls_back_to_host() {
+        let profile = minimal_profile();
+        let conn = profile.resolve_bfs_connection();
+        assert_eq!(conn.host, "myhost");
+    }
+
+    #[test]
+    fn resolve_bfs_connection_port_defaults_to_2581() {
+        let profile = minimal_profile();
+        let conn = profile.resolve_bfs_connection();
+        assert_eq!(conn.port, 2581);
+    }
+
+    #[test]
+    fn resolve_bfs_connection_bucket_defaults_to_default() {
+        let profile = minimal_profile();
+        let conn = profile.resolve_bfs_connection();
+        assert_eq!(conn.bucket, "default");
+    }
+
+    #[test]
+    fn resolve_bfs_connection_tls_falls_back_to_profile_tls() {
+        let mut profile = minimal_profile();
+        profile.tls = Some(false);
+        let conn = profile.resolve_bfs_connection();
+        assert!(!conn.tls);
+    }
+
+    #[test]
+    fn resolve_bfs_connection_tls_defaults_to_true() {
+        let profile = minimal_profile();
+        let conn = profile.resolve_bfs_connection();
+        assert!(conn.tls);
+    }
+
+    #[test]
+    fn resolve_bfs_connection_validate_cert_falls_back_to_profile() {
+        let mut profile = minimal_profile();
+        profile.validate_certificate = Some(false);
+        let conn = profile.resolve_bfs_connection();
+        assert!(!conn.validate_certificate);
+    }
+
+    #[test]
+    fn resolve_bfs_connection_validate_cert_defaults_to_true() {
+        let profile = minimal_profile();
+        let conn = profile.resolve_bfs_connection();
+        assert!(conn.validate_certificate);
+    }
+
+    #[test]
+    fn resolve_bfs_connection_read_password_falls_back_to_write_password() {
+        let mut profile = minimal_profile();
+        profile.bfs_write_password = Some("writepw".to_string());
+        let conn = profile.resolve_bfs_connection();
+        assert_eq!(conn.read_password, Some("writepw".to_string()));
+    }
+
+    #[test]
+    fn resolve_bfs_connection_read_password_none_when_no_passwords() {
+        let profile = minimal_profile();
+        let conn = profile.resolve_bfs_connection();
+        assert_eq!(conn.read_password, None);
+    }
+
+    #[test]
+    fn resolve_bfs_connection_write_password_none_when_not_set() {
+        let profile = minimal_profile();
+        let conn = profile.resolve_bfs_connection();
+        assert_eq!(conn.write_password, None);
+    }
+
     #[test]
     fn config_file_parsed_correctly() {
         let dir = tempfile::tempdir().unwrap();
@@ -197,6 +459,13 @@ validate_certificate = false
             tls: Some(true),
             validate_certificate: Some(false),
             default: None,
+            bfs_host: None,
+            bfs_port: None,
+            bfs_bucket: None,
+            bfs_write_password: None,
+            bfs_read_password: None,
+            bfs_tls: None,
+            bfs_validate_certificate: None,
         };
 
         let dsn = profile.to_dsn();
@@ -217,6 +486,13 @@ validate_certificate = false
             tls: Some(true),
             validate_certificate: Some(true),
             default: None,
+            bfs_host: None,
+            bfs_port: None,
+            bfs_bucket: None,
+            bfs_write_password: None,
+            bfs_read_password: None,
+            bfs_tls: None,
+            bfs_validate_certificate: None,
         };
 
         let dsn = profile.to_dsn();
@@ -238,6 +514,13 @@ validate_certificate = false
             tls: Some(true),
             validate_certificate: Some(true),
             default: None,
+            bfs_host: None,
+            bfs_port: None,
+            bfs_bucket: None,
+            bfs_write_password: None,
+            bfs_read_password: None,
+            bfs_tls: None,
+            bfs_validate_certificate: None,
         };
 
         let dsn = profile.to_dsn();
@@ -255,6 +538,13 @@ validate_certificate = false
             tls: None,
             validate_certificate: Some(true),
             default: None,
+            bfs_host: None,
+            bfs_port: None,
+            bfs_bucket: None,
+            bfs_write_password: None,
+            bfs_read_password: None,
+            bfs_tls: None,
+            bfs_validate_certificate: None,
         };
 
         let dsn = profile.to_dsn();
@@ -272,6 +562,13 @@ validate_certificate = false
             tls: Some(true),
             validate_certificate: None,
             default: None,
+            bfs_host: None,
+            bfs_port: None,
+            bfs_bucket: None,
+            bfs_write_password: None,
+            bfs_read_password: None,
+            bfs_tls: None,
+            bfs_validate_certificate: None,
         };
 
         let dsn = profile.to_dsn();
@@ -289,6 +586,13 @@ validate_certificate = false
             tls: Some(false),
             validate_certificate: Some(false),
             default: None,
+            bfs_host: None,
+            bfs_port: None,
+            bfs_bucket: None,
+            bfs_write_password: None,
+            bfs_read_password: None,
+            bfs_tls: None,
+            bfs_validate_certificate: None,
         };
 
         let dsn = profile.to_dsn();
@@ -373,6 +677,13 @@ password = "s3cret"
                 tls: None,
                 validate_certificate: None,
                 default: None,
+                bfs_host: None,
+                bfs_port: None,
+                bfs_bucket: None,
+                bfs_write_password: None,
+                bfs_read_password: None,
+                bfs_tls: None,
+                bfs_validate_certificate: None,
             },
         );
         let toml_str = toml::to_string(&config).unwrap();
@@ -399,6 +710,13 @@ password = "s3cret"
                 tls: None,
                 validate_certificate: None,
                 default: None,
+                bfs_host: None,
+                bfs_port: None,
+                bfs_bucket: None,
+                bfs_write_password: None,
+                bfs_read_password: None,
+                bfs_tls: None,
+                bfs_validate_certificate: None,
             },
         );
         let (name, _profile) = find_default_profile(&config).unwrap();
@@ -419,6 +737,13 @@ password = "s3cret"
                 tls: None,
                 validate_certificate: None,
                 default: None,
+                bfs_host: None,
+                bfs_port: None,
+                bfs_bucket: None,
+                bfs_write_password: None,
+                bfs_read_password: None,
+                bfs_tls: None,
+                bfs_validate_certificate: None,
             },
         );
         config.insert(
@@ -432,6 +757,13 @@ password = "s3cret"
                 tls: None,
                 validate_certificate: None,
                 default: Some(true),
+                bfs_host: None,
+                bfs_port: None,
+                bfs_bucket: None,
+                bfs_write_password: None,
+                bfs_read_password: None,
+                bfs_tls: None,
+                bfs_validate_certificate: None,
             },
         );
         let (name, _profile) = find_default_profile(&config).unwrap();
@@ -452,6 +784,13 @@ password = "s3cret"
                 tls: None,
                 validate_certificate: None,
                 default: Some(true),
+                bfs_host: None,
+                bfs_port: None,
+                bfs_bucket: None,
+                bfs_write_password: None,
+                bfs_read_password: None,
+                bfs_tls: None,
+                bfs_validate_certificate: None,
             },
         );
         config.insert(
@@ -465,6 +804,13 @@ password = "s3cret"
                 tls: None,
                 validate_certificate: None,
                 default: Some(true),
+                bfs_host: None,
+                bfs_port: None,
+                bfs_bucket: None,
+                bfs_write_password: None,
+                bfs_read_password: None,
+                bfs_tls: None,
+                bfs_validate_certificate: None,
             },
         );
         let err = find_default_profile(&config).unwrap_err();
@@ -491,6 +837,13 @@ password = "s3cret"
                 tls: None,
                 validate_certificate: None,
                 default: None,
+                bfs_host: None,
+                bfs_port: None,
+                bfs_bucket: None,
+                bfs_write_password: None,
+                bfs_read_password: None,
+                bfs_tls: None,
+                bfs_validate_certificate: None,
             },
         );
         config.insert(
@@ -504,6 +857,13 @@ password = "s3cret"
                 tls: None,
                 validate_certificate: None,
                 default: None,
+                bfs_host: None,
+                bfs_port: None,
+                bfs_bucket: None,
+                bfs_write_password: None,
+                bfs_read_password: None,
+                bfs_tls: None,
+                bfs_validate_certificate: None,
             },
         );
         let err = find_default_profile(&config).unwrap_err();

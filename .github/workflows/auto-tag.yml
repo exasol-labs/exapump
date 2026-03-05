@@ -1,0 +1,29 @@
+name: Auto Tag
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  tag-if-bumped:
+    name: Create tag on version bump
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect version bump and tag
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          tag="v${version}"
+
+          if git rev-parse "$tag" >/dev/null 2>&1; then
+            echo "Tag $tag already exists — no version bump detected."
+          else
+            echo "New version detected: $tag"
+            git tag "$tag"
+            git push origin "$tag"
+          fi

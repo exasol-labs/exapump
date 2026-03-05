@@ -11,6 +11,14 @@ use parquet::arrow::ArrowWriter;
 #[allow(dead_code)]
 static SCHEMA_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
+/// Install the rustls CryptoProvider once per test process.
+/// Needed because both `ring` and `aws-lc-rs` are in the dependency tree
+/// (from reqwest and exarrow-rs respectively).
+#[allow(dead_code)]
+pub fn install_crypto_provider() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+}
+
 #[allow(dead_code)]
 pub const DUMMY_DSN: &str = "exasol://user:pwd@host:8563";
 #[allow(dead_code)]
@@ -20,7 +28,7 @@ pub const DOCKER_DSN: &str =
 /// Panics if Exasol is not reachable at localhost:8563.
 ///
 /// Start a local instance with:
-/// `docker run -d --name exasol-test --privileged --shm-size=2g -p 8563:8563 exasol/docker-db:2025.2.0`
+/// `docker run -d --name exasol-test --privileged --shm-size=2g -p 8563:8563 -p 2581:2581 exasol/docker-db:2025.2.0`
 #[allow(unused_macros)]
 macro_rules! require_exasol {
     () => {
@@ -30,16 +38,66 @@ macro_rules! require_exasol {
             TcpStream::connect_timeout(&"127.0.0.1:8563".parse().unwrap(), Duration::from_secs(2))
                 .is_ok();
         if !reachable {
-            panic!("Exasol is not available at localhost:8563. Start it with: docker run -d --name exasol-test --privileged --shm-size=2g -p 8563:8563 exasol/docker-db:2025.2.0");
+            panic!("Exasol is not available at localhost:8563. Start it with: docker run -d --name exasol-test --privileged --shm-size=2g -p 8563:8563 -p 2581:2581 exasol/docker-db:2025.2.0");
         }
     };
 }
 #[allow(unused_imports)]
 pub(crate) use require_exasol;
 
+/// Extracts BucketFS write password from the running Exasol Docker container.
+/// Shells out to `docker exec` to read EXAConf and decode the base64 password.
+/// Panics if the container is not running or BucketFS is not configured.
+#[allow(dead_code)]
+pub fn bfs_write_password() -> String {
+    let output = std::process::Command::new("docker")
+        .args(["exec", "exasol-test", "cat", "/exa/etc/EXAConf"])
+        .output()
+        .expect("Failed to exec into exasol-test container");
+    let exaconf = String::from_utf8(output.stdout).expect("EXAConf is not valid UTF-8");
+    let line = exaconf
+        .lines()
+        .find(|l| l.contains("WritePasswd"))
+        .expect("WritePasswd not found in EXAConf");
+    let b64 = line
+        .split_once('=')
+        .expect("WritePasswd line has no '=' separator")
+        .1
+        .trim();
+    use base64::Engine;
+    String::from_utf8(
+        base64::engine::general_purpose::STANDARD
+            .decode(b64)
+            .expect("WritePasswd is not valid base64"),
+    )
+    .expect("Decoded password is not valid UTF-8")
+}
+
+/// Panics if BucketFS is not reachable at localhost:2581.
+#[allow(unused_macros)]
+macro_rules! require_bucketfs {
+    () => {
+        use std::net::TcpStream;
+        use std::time::Duration;
+        let reachable =
+            TcpStream::connect_timeout(&"127.0.0.1:2581".parse().unwrap(), Duration::from_secs(2))
+                .is_ok();
+        if !reachable {
+            panic!(
+                "BucketFS is not available at localhost:2581. \
+                 Start with: docker run -d --name exasol-test --privileged --shm-size=2g \
+                 -p 8563:8563 -p 2581:2581 exasol/docker-db:2025.2.0"
+            );
+        }
+    };
+}
+#[allow(unused_imports)]
+pub(crate) use require_bucketfs;
+
 /// Creates a unique schema in Exasol and returns the connection and schema name.
 #[allow(dead_code)]
 pub async fn setup_exasol_schema(prefix: &str) -> (exarrow_rs::Connection, String) {
+    install_crypto_provider();
     let seq = SCHEMA_COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     let schema_name = format!(
         "{prefix}_{}_{}",
