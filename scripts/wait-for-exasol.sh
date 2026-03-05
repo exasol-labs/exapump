@@ -101,8 +101,8 @@ while true; do
   # Run health check, capturing stderr (diagnostics) while suppressing stdout
   if HC_ERR=$(REQUIRE_EXASOL=1 "$HEALTH_CHECK" 2>&1 >/dev/null); then
     TOTAL_SECS=$(elapsed)
-    echo "Exasol is ready! (phase2 attempt ${PHASE2_ATTEMPT}, total ${TOTAL_SECS}s)"
-    exit 0
+    echo "SQL ready (phase2 attempt ${PHASE2_ATTEMPT}, total ${TOTAL_SECS}s)"
+    break
   else
     LAST_ERROR="$HC_ERR"
   fi
@@ -119,3 +119,32 @@ while true; do
 
   sleep "$SLEEP_INTERVAL"
 done
+
+# --- Phase 3: BucketFS port check ---
+BFS_PORT="${EXASOL_BFS_PORT:-2581}"
+echo ""
+echo "--- Phase 3: Waiting for BucketFS port ${HOST}:${BFS_PORT} ---"
+PHASE3_START=$(date +%s)
+LAST_DIAG=$(elapsed)
+
+while true; do
+  check_timeout
+  check_container
+
+  if (echo > "/dev/tcp/${HOST}/${BFS_PORT}") 2>/dev/null; then
+    PHASE3_ELAPSED=$(( $(date +%s) - PHASE3_START ))
+    echo "BucketFS port ${HOST}:${BFS_PORT} is open (after ${PHASE3_ELAPSED}s)"
+    break
+  fi
+
+  SECS=$(elapsed)
+  if [ $(( SECS - LAST_DIAG )) -ge "$DIAG_INTERVAL" ]; then
+    echo "  Still waiting for BucketFS port... (${SECS}s elapsed)"
+    LAST_DIAG=$SECS
+  fi
+
+  sleep "$SLEEP_INTERVAL"
+done
+
+echo ""
+echo "Exasol is ready! (total $(elapsed)s)"

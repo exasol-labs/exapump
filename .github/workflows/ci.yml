@@ -54,6 +54,7 @@ jobs:
             --shm-size=2g \
             -e COSLWD_ENABLED=1 \
             -p 8563:8563 \
+            -p 2581:2581 \
             exasol/docker-db:2025.2.0
 
       - uses: actions/checkout@v4
