@@ -80,8 +80,8 @@
   </g>
 
   <!-- Text: exapump with white outline for dark mode -->
-  <text x="100" y="158" font-family="Arial, sans-serif" font-size="20" font-weight="bold"
+  <text x="100" y="158" font-family="Inter, sans-serif" font-size="20" font-weight="bold"
         fill="none" stroke="white" stroke-width="4" stroke-linejoin="round" text-anchor="middle">exapump</text>
-  <text x="100" y="158" font-family="Arial, sans-serif" font-size="20" font-weight="bold"
+  <text x="100" y="158" font-family="Inter, sans-serif" font-size="20" font-weight="bold"
         fill="#333" text-anchor="middle">exapump</text>
 </svg>
