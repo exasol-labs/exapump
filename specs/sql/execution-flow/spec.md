@@ -75,3 +75,58 @@ SQL input may contain multiple semicolon-separated statements. Statements are sp
 * *WHEN* the command prints the status line to stderr
 * *THEN* the statement text in the status line SHOULD be truncated with `...`
 * *AND* the full statement MUST still be sent to Exasol unmodified
+
+### Scenario: Line comment is stripped from piped input
+
+* *GIVEN* a valid connection to Exasol
+* *AND* the SQL input piped on stdin is `-- this is a comment\nSELECT 1`
+* *WHEN* the command executes
+* *THEN* the statement sent to Exasol MUST be `SELECT 1` with the comment removed
+* *AND* stderr MUST show a status line like `[1/1] SELECT 1 ... 1 rows`
+* *AND* the exit code MUST be 0
+
+### Scenario: Trailing line comment on a statement is stripped
+
+* *GIVEN* a valid connection to Exasol
+* *AND* the SQL input is `SELECT 1 -- trailing comment\n; SELECT 2`
+* *WHEN* the command executes
+* *THEN* the command MUST produce exactly 2 statements
+* *AND* the first statement sent to Exasol MUST be `SELECT 1` without the trailing comment
+* *AND* the second statement MUST be `SELECT 2`
+
+### Scenario: Block comment spanning lines is stripped
+
+* *GIVEN* a valid connection to Exasol
+* *AND* the SQL input is `/* multi\nline\ncomment */ SELECT 1`
+* *WHEN* the command executes
+* *THEN* the statement sent to Exasol MUST be `SELECT 1` with the block comment removed
+* *AND* the exit code MUST be 0
+
+### Scenario: Semicolon inside a line comment does not split statements
+
+* *GIVEN* the SQL input is `SELECT 1 -- a; b; c\n`
+* *WHEN* the command splits statements
+* *THEN* it MUST produce exactly 1 statement
+* *AND* the semicolons inside the line comment MUST NOT split the statement
+
+### Scenario: Semicolon inside a block comment does not split statements
+
+* *GIVEN* the SQL input is `SELECT /* a; b */ 1`
+* *WHEN* the command splits statements
+* *THEN* it MUST produce exactly 1 statement
+* *AND* the semicolons inside the block comment MUST NOT split the statement
+
+### Scenario: Comment-like sequence inside a string literal is preserved
+
+* *GIVEN* the SQL input is `SELECT '-- not a comment' AS val`
+* *WHEN* the command executes
+* *THEN* the statement sent to Exasol MUST retain the `-- not a comment` text inside the string literal
+* *AND* the command MUST produce exactly 1 statement
+
+### Scenario: Input containing only comments yields no statements
+
+* *GIVEN* the SQL input is `-- just a comment\n/* another */\n`
+* *WHEN* the command executes
+* *THEN* the command MUST fail with an error message `No SQL statements to execute`
+* *AND* no connection attempt MUST be made
+* *AND* the exit code MUST be non-zero

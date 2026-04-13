@@ -6,6 +6,72 @@ use crate::cli::{OutputFormat, SqlArgs};
 
 const STATUS_LINE_MAX_SQL_LEN: usize = 60;
 
+/// Strip SQL line comments (`-- ...` to end of line) and block comments (`/* ... */`)
+/// from the input, preserving single- and double-quoted string literals. Each comment
+/// span is replaced with a single space so that adjacent tokens stay separated.
+/// Unterminated block comments are treated as a comment to end of input.
+pub fn strip_comments(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+    let mut in_single_quote = false;
+    let mut in_double_quote = false;
+
+    while let Some(c) = chars.next() {
+        if in_single_quote {
+            out.push(c);
+            if c == '\'' {
+                in_single_quote = false;
+            }
+            continue;
+        }
+
+        if in_double_quote {
+            out.push(c);
+            if c == '"' {
+                in_double_quote = false;
+            }
+            continue;
+        }
+
+        // Line comment: --
+        if c == '-' && chars.peek() == Some(&'-') {
+            chars.next(); // consume second '-'
+            out.push(' ');
+            while let Some(&next) = chars.peek() {
+                if next == '\n' {
+                    break;
+                }
+                chars.next();
+            }
+            continue;
+        }
+
+        // Block comment: /* ... */
+        if c == '/' && chars.peek() == Some(&'*') {
+            chars.next(); // consume '*'
+            out.push(' ');
+            let mut prev = '\0';
+            for next in chars.by_ref() {
+                if prev == '*' && next == '/' {
+                    break;
+                }
+                prev = next;
+            }
+            continue;
+        }
+
+        if c == '\'' {
+            in_single_quote = true;
+        } else if c == '"' {
+            in_double_quote = true;
+        }
+
+        out.push(c);
+    }
+
+    out
+}
+
 /// Split SQL input on semicolons, respecting single-quoted and double-quoted strings.
 /// Trailing semicolons produce no empty statements. Whitespace-only statements are skipped.
 pub fn split_statements(input: &str) -> Vec<String> {
@@ -187,6 +253,7 @@ pub fn write_json(batches: &[RecordBatch]) -> anyhow::Result<()> {
 /// Execute the `sql` subcommand.
 pub async fn run(args: SqlArgs) -> anyhow::Result<()> {
     let sql_input = resolve_sql_input(&args)?;
+    let sql_input = strip_comments(&sql_input);
 
     let statements = split_statements(&sql_input);
     if statements.is_empty() {
@@ -403,6 +470,84 @@ mod tests {
         assert_eq!(result.len(), 2);
         assert_eq!(result[0], "CREATE TABLE t (\n  id INT\n)");
         assert_eq!(result[1], "INSERT INTO t VALUES (1)");
+    }
+
+    // --- strip_comments tests ---
+
+    #[test]
+    fn strip_comments_trailing_line_comment() {
+        let result = strip_comments("SELECT 1 -- trailing comment\n; SELECT 2");
+        let statements = split_statements(&result);
+        assert_eq!(statements.len(), 2);
+        assert_eq!(statements[0], "SELECT 1");
+        assert_eq!(statements[1], "SELECT 2");
+    }
+
+    #[test]
+    fn strip_comments_multiline_block() {
+        let result = strip_comments("/* multi\nline\ncomment */ SELECT 1");
+        assert_eq!(result.trim(), "SELECT 1");
+    }
+
+    #[test]
+    fn strip_then_split_semicolon_in_line_comment() {
+        let result = strip_comments("SELECT 1 -- a; b; c\n");
+        let statements = split_statements(&result);
+        assert_eq!(statements.len(), 1);
+        assert_eq!(statements[0], "SELECT 1");
+    }
+
+    #[test]
+    fn strip_then_split_semicolon_in_block_comment() {
+        let result = strip_comments("SELECT /* a; b */ 1");
+        let statements = split_statements(&result);
+        assert_eq!(statements.len(), 1);
+        assert_eq!(
+            statements[0].split_whitespace().collect::<Vec<_>>(),
+            vec!["SELECT", "1"]
+        );
+    }
+
+    #[test]
+    fn strip_comments_preserves_string_literal() {
+        let result = strip_comments("SELECT '-- not a comment' AS val");
+        assert_eq!(result, "SELECT '-- not a comment' AS val");
+        let statements = split_statements(&result);
+        assert_eq!(statements.len(), 1);
+    }
+
+    #[test]
+    fn strip_comments_preserves_block_comment_in_string_literal() {
+        let result = strip_comments("SELECT '/* keep me */' AS val");
+        assert_eq!(result, "SELECT '/* keep me */' AS val");
+    }
+
+    #[test]
+    fn strip_comments_only_yields_empty() {
+        let result = strip_comments("-- just a comment\n/* another */\n");
+        let statements = split_statements(&result);
+        assert!(statements.is_empty());
+    }
+
+    #[test]
+    fn strip_comments_line_comment_at_start() {
+        let result = strip_comments("-- this is a comment\nSELECT 1");
+        let statements = split_statements(&result);
+        assert_eq!(statements.len(), 1);
+        assert_eq!(statements[0], "SELECT 1");
+    }
+
+    #[test]
+    fn strip_comments_unterminated_block() {
+        let result = strip_comments("SELECT 1 /* unterminated");
+        assert_eq!(result.trim(), "SELECT 1");
+    }
+
+    #[test]
+    fn strip_comments_preserves_utf8() {
+        let result = strip_comments("SELECT 'äöü' /* コメント */ AS val");
+        assert!(result.contains("'äöü'"));
+        assert!(!result.contains("コメント"));
     }
 
     // --- StatementType tests ---
