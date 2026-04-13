@@ -106,3 +106,42 @@ The resolution priority (highest to lowest) is:
 * *WHEN* the user runs any subcommand requiring a connection
 * *THEN* the CLI MUST exit with a non-zero code
 * *AND* stderr MUST suggest how to provide connection info (e.g., `exapump profile add <name>`)
+
+### Scenario: ConnectionArgs exposes --certificate-fingerprint flag
+
+* *GIVEN* exapump is installed
+* *WHEN* the user runs `exapump upload --help`
+* *THEN* the output MUST show a `--certificate-fingerprint` option
+* *AND* the option description MUST indicate it pins the TLS connection to a SHA-256 hex fingerprint of the server's DER certificate
+* *AND* the same option MUST also appear in `exapump export --help`, `exapump sql --help`, and `exapump interactive --help`
+
+### Scenario: --certificate-fingerprint flag is appended to a --dsn value without one
+
+* *GIVEN* the user provides `--dsn exasol://user:pwd@host:8563?tls=true&validateservercertificate=0`
+* *AND* the user provides `--certificate-fingerprint aabbcc112233`
+* *WHEN* exapump resolves the connection string
+* *THEN* the resolved DSN MUST contain `certificate_fingerprint=aabbcc112233` as a query parameter
+* *AND* the existing `tls` and `validateservercertificate` parameters MUST be preserved
+
+### Scenario: --certificate-fingerprint flag overrides profile fingerprint
+
+* *GIVEN* a config profile named `prod` has `certificate_fingerprint = "aaaaaa"`
+* *AND* the user runs `exapump sql 'SELECT 1' --profile prod --certificate-fingerprint bbbbbb`
+* *WHEN* exapump resolves the connection string
+* *THEN* the resolved DSN MUST contain `certificate_fingerprint=bbbbbb`
+* *AND* the resolved DSN MUST NOT contain `certificate_fingerprint=aaaaaa`
+
+### Scenario: Profile fingerprint flows into DSN when no flag is set
+
+* *GIVEN* a config profile named `prod` has `certificate_fingerprint = "ccdd11"`
+* *AND* no `--certificate-fingerprint` flag is provided
+* *WHEN* the user runs `exapump sql 'SELECT 1' --profile prod`
+* *THEN* the resolved DSN MUST contain `certificate_fingerprint=ccdd11`
+
+### Scenario: No fingerprint anywhere yields no fingerprint parameter
+
+* *GIVEN* the user provides `--dsn exasol://user:pwd@host:8563?tls=true`
+* *AND* no `--certificate-fingerprint` flag is provided
+* *AND* no profile is selected
+* *WHEN* exapump resolves the connection string
+* *THEN* the resolved DSN MUST NOT contain a `certificate_fingerprint` parameter

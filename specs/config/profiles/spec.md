@@ -31,6 +31,7 @@ password = "s3cret"
 schema = "my_schema"
 tls = true
 validate_certificate = true
+certificate_fingerprint = "1a2b3c4d5e6f7890abcdef1234567890abcdef1234567890abcdef1234567890"
 bfs_host = "bfs-node.example.com"
 bfs_port = 6583
 bfs_bucket = "data"
@@ -40,9 +41,10 @@ bfs_tls = false
 bfs_validate_certificate = false
 ```
 * *WHEN* exapump parses the config
-* *THEN* each profile MUST support the optional fields: `bfs_host`, `bfs_port`, `bfs_bucket`, `bfs_write_password`, `bfs_read_password`, `bfs_tls`, `bfs_validate_certificate`
-* *AND* profiles without BucketFS fields MUST still be valid
+* *THEN* each profile MUST support the optional fields: `certificate_fingerprint`, `bfs_host`, `bfs_port`, `bfs_bucket`, `bfs_write_password`, `bfs_read_password`, `bfs_tls`, `bfs_validate_certificate`
+* *AND* profiles without any of these optional fields MUST still be valid
 * *AND* BucketFS fields MUST NOT affect DSN generation for database connections
+* *AND* `certificate_fingerprint` MUST NOT affect BucketFS connection construction
 
 ### Scenario: Default profile auto-selected
 
@@ -305,3 +307,16 @@ bfs_validate_certificate = false
 * *WHEN* the user runs a BucketFS write operation (`cp` upload or `rm`)
 * *THEN* the CLI MUST exit with a non-zero code
 * *AND* stderr MUST indicate that `bfs_write_password` is required for write operations
+
+### Scenario: Profile certificate_fingerprint is appended to DSN
+
+* *GIVEN* a profile named `pinned` with `host = "exa.example.com"`, `user = "u"`, `password = "p"`, `tls = true`, `validate_certificate = false`, `certificate_fingerprint = "deadbeef"`
+* *WHEN* exapump generates the DSN for the profile
+* *THEN* the DSN MUST contain `certificate_fingerprint=deadbeef` as a query parameter
+* *AND* the DSN MUST also contain `tls=true` and `validateservercertificate=0`
+
+### Scenario: Profile without certificate_fingerprint omits the parameter
+
+* *GIVEN* a profile named `nopin` with no `certificate_fingerprint` field
+* *WHEN* exapump generates the DSN for the profile
+* *THEN* the DSN MUST NOT contain a `certificate_fingerprint` parameter
