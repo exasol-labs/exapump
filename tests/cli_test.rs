@@ -218,6 +218,53 @@ fn sql_stdin_dash() {
 }
 
 #[test]
+fn sql_strips_line_comment_from_stdin() {
+    // Piping "-- comment\nSELECT 1" must NOT fail at the input-parsing stage
+    // (i.e. must not hit "No SQL statements to execute"). It fails at connection
+    // against the unreachable dummy DSN, confirming the comment was stripped and
+    // the SELECT reached the executor path.
+    fixtures::exapump()
+        .env("EXAPUMP_DSN", fixtures::DUMMY_DSN)
+        .arg("sql")
+        .write_stdin("-- this is a comment\nSELECT 1")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("No SQL statements to execute").not())
+        .stderr(
+            predicate::str::contains("connect")
+                .or(predicate::str::contains("error"))
+                .or(predicate::str::contains("Error")),
+        );
+}
+
+#[test]
+fn sql_strips_block_comment_from_stdin() {
+    fixtures::exapump()
+        .env("EXAPUMP_DSN", fixtures::DUMMY_DSN)
+        .arg("sql")
+        .write_stdin("/* block comment */ SELECT 1")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("No SQL statements to execute").not())
+        .stderr(
+            predicate::str::contains("connect")
+                .or(predicate::str::contains("error"))
+                .or(predicate::str::contains("Error")),
+        );
+}
+
+#[test]
+fn sql_comment_only_input_yields_no_statements() {
+    fixtures::exapump()
+        .env("EXAPUMP_DSN", fixtures::DUMMY_DSN)
+        .arg("sql")
+        .write_stdin("-- just a comment\n/* another */\n")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("No SQL statements to execute"));
+}
+
+#[test]
 fn sql_default_format_is_csv() {
     // sql --help should show csv as default
     fixtures::exapump()
