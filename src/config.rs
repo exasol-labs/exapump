@@ -17,6 +17,8 @@ pub struct Profile {
     pub tls: Option<bool>,
     pub validate_certificate: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub certificate_fingerprint: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub default: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bfs_host: Option<String>,
@@ -95,6 +97,10 @@ impl Profile {
             tls, validate_int
         ));
 
+        if let Some(ref fingerprint) = self.certificate_fingerprint {
+            dsn.push_str(&format!("&certificate_fingerprint={}", fingerprint));
+        }
+
         dsn
     }
 }
@@ -108,6 +114,7 @@ pub fn docker_preset() -> Profile {
         schema: None,
         tls: Some(true),
         validate_certificate: Some(false),
+        certificate_fingerprint: None,
         default: None,
         bfs_host: None,
         bfs_port: None,
@@ -228,6 +235,7 @@ mod tests {
             schema: None,
             tls: Some(true),
             validate_certificate: Some(true),
+            certificate_fingerprint: None,
             default: None,
             bfs_host: Some("bfshost".to_string()),
             bfs_port: Some(2581),
@@ -248,6 +256,7 @@ mod tests {
             schema: None,
             tls: None,
             validate_certificate: None,
+            certificate_fingerprint: None,
             default: None,
             bfs_host: None,
             bfs_port: None,
@@ -458,6 +467,7 @@ validate_certificate = false
             schema: None,
             tls: Some(true),
             validate_certificate: Some(false),
+            certificate_fingerprint: None,
             default: None,
             bfs_host: None,
             bfs_port: None,
@@ -485,6 +495,7 @@ validate_certificate = false
             schema: Some("my_schema".to_string()),
             tls: Some(true),
             validate_certificate: Some(true),
+            certificate_fingerprint: None,
             default: None,
             bfs_host: None,
             bfs_port: None,
@@ -513,6 +524,7 @@ validate_certificate = false
             schema: None,
             tls: Some(true),
             validate_certificate: Some(true),
+            certificate_fingerprint: None,
             default: None,
             bfs_host: None,
             bfs_port: None,
@@ -537,6 +549,7 @@ validate_certificate = false
             schema: None,
             tls: None,
             validate_certificate: Some(true),
+            certificate_fingerprint: None,
             default: None,
             bfs_host: None,
             bfs_port: None,
@@ -561,6 +574,7 @@ validate_certificate = false
             schema: None,
             tls: Some(true),
             validate_certificate: None,
+            certificate_fingerprint: None,
             default: None,
             bfs_host: None,
             bfs_port: None,
@@ -576,6 +590,29 @@ validate_certificate = false
     }
 
     #[test]
+    fn to_dsn_includes_certificate_fingerprint() {
+        let mut profile = minimal_profile();
+        profile.tls = Some(true);
+        profile.validate_certificate = Some(false);
+        profile.certificate_fingerprint = Some("deadbeef".to_string());
+
+        let dsn = profile.to_dsn();
+        assert!(dsn.contains("tls=true"), "got: {dsn}");
+        assert!(dsn.contains("validateservercertificate=0"), "got: {dsn}");
+        assert!(
+            dsn.contains("certificate_fingerprint=deadbeef"),
+            "got: {dsn}"
+        );
+    }
+
+    #[test]
+    fn to_dsn_omits_certificate_fingerprint_when_none() {
+        let profile = minimal_profile();
+        let dsn = profile.to_dsn();
+        assert!(!dsn.contains("certificate_fingerprint"), "got: {dsn}");
+    }
+
+    #[test]
     fn profile_dsn_maps_all_parameters() {
         let profile = Profile {
             host: "prod.example.com".to_string(),
@@ -585,6 +622,7 @@ validate_certificate = false
             schema: Some("analytics".to_string()),
             tls: Some(false),
             validate_certificate: Some(false),
+            certificate_fingerprint: None,
             default: None,
             bfs_host: None,
             bfs_port: None,
@@ -676,6 +714,7 @@ password = "s3cret"
                 schema: None,
                 tls: None,
                 validate_certificate: None,
+                certificate_fingerprint: None,
                 default: None,
                 bfs_host: None,
                 bfs_port: None,
@@ -709,6 +748,7 @@ password = "s3cret"
                 schema: None,
                 tls: None,
                 validate_certificate: None,
+                certificate_fingerprint: None,
                 default: None,
                 bfs_host: None,
                 bfs_port: None,
@@ -736,6 +776,7 @@ password = "s3cret"
                 schema: None,
                 tls: None,
                 validate_certificate: None,
+                certificate_fingerprint: None,
                 default: None,
                 bfs_host: None,
                 bfs_port: None,
@@ -756,6 +797,7 @@ password = "s3cret"
                 schema: None,
                 tls: None,
                 validate_certificate: None,
+                certificate_fingerprint: None,
                 default: Some(true),
                 bfs_host: None,
                 bfs_port: None,
@@ -783,6 +825,7 @@ password = "s3cret"
                 schema: None,
                 tls: None,
                 validate_certificate: None,
+                certificate_fingerprint: None,
                 default: Some(true),
                 bfs_host: None,
                 bfs_port: None,
@@ -803,6 +846,7 @@ password = "s3cret"
                 schema: None,
                 tls: None,
                 validate_certificate: None,
+                certificate_fingerprint: None,
                 default: Some(true),
                 bfs_host: None,
                 bfs_port: None,
@@ -836,6 +880,7 @@ password = "s3cret"
                 schema: None,
                 tls: None,
                 validate_certificate: None,
+                certificate_fingerprint: None,
                 default: None,
                 bfs_host: None,
                 bfs_port: None,
@@ -856,6 +901,7 @@ password = "s3cret"
                 schema: None,
                 tls: None,
                 validate_certificate: None,
+                certificate_fingerprint: None,
                 default: None,
                 bfs_host: None,
                 bfs_port: None,
