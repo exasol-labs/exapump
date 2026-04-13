@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.5
+
+- Strip SQL line (`--`) and block (`/* ... */`) comments from `sql` command input before execution (#8)
+
 ## 0.7.4
 
 - Pin TLS connections to a server certificate via `--certificate-fingerprint` flag and `certificate_fingerprint` profile field (SHA-256 hex of DER)
