@@ -523,6 +523,27 @@ fn bucketfs_rm_help_shows_path() {
 }
 
 #[test]
+fn certificate_fingerprint_flag_in_help_for_all_commands() {
+    for cmd in ["upload", "export", "sql", "interactive"] {
+        fixtures::exapump()
+            .args([cmd, "--help"])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("--certificate-fingerprint"))
+            .stdout(predicate::str::contains("SHA-256"));
+    }
+}
+
+#[test]
+fn profile_add_help_includes_certificate_fingerprint() {
+    fixtures::exapump()
+        .args(["profile", "add", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--certificate-fingerprint"));
+}
+
+#[test]
 fn profile_add_help_includes_bucketfs_flags() {
     fixtures::exapump()
         .args(["profile", "add", "--help"])

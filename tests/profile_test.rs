@@ -1042,6 +1042,107 @@ bfs_write_password = "writepw"
         .stdout(predicate::str::contains("bfs_bucket").not());
 }
 
+#[test]
+fn parses_profile_with_certificate_fingerprint() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = write_config(
+        dir.path(),
+        r#"
+[pinned]
+host = "exa.example.com"
+user = "u"
+password = "p"
+certificate_fingerprint = "1a2b3c4d5e6f7890abcdef1234567890abcdef1234567890abcdef1234567890"
+"#,
+    );
+
+    fixtures::exapump()
+        .env("EXAPUMP_CONFIG", config_path.to_str().unwrap())
+        .args(["profile", "show", "pinned"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "certificate_fingerprint: 1a2b3c4d5e6f7890abcdef1234567890abcdef1234567890abcdef1234567890",
+        ));
+}
+
+#[test]
+fn profile_add_persists_certificate_fingerprint() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join(".exapump").join("config.toml");
+    std::fs::create_dir_all(config_path.parent().unwrap()).unwrap();
+
+    fixtures::exapump()
+        .env("EXAPUMP_CONFIG", config_path.to_str().unwrap())
+        .args([
+            "profile",
+            "add",
+            "staging",
+            "--host",
+            "exa.example.com",
+            "--user",
+            "u",
+            "--password",
+            "p",
+            "--certificate-fingerprint",
+            "deadbeefcafebabe",
+        ])
+        .assert()
+        .success();
+
+    let content = std::fs::read_to_string(&config_path).unwrap();
+    assert!(
+        content.contains(r#"certificate_fingerprint = "deadbeefcafebabe""#),
+        "Expected fingerprint in TOML, got:\n{}",
+        content,
+    );
+}
+
+#[test]
+fn profile_show_prints_certificate_fingerprint_when_set() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = write_config(
+        dir.path(),
+        r#"
+[demo]
+host = "localhost"
+user = "sys"
+password = "exasol"
+certificate_fingerprint = "deadbeef"
+"#,
+    );
+
+    fixtures::exapump()
+        .env("EXAPUMP_CONFIG", config_path.to_str().unwrap())
+        .args(["profile", "show", "demo"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "certificate_fingerprint: deadbeef",
+        ));
+}
+
+#[test]
+fn profile_show_omits_certificate_fingerprint_when_unset() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = write_config(
+        dir.path(),
+        r#"
+[demo]
+host = "localhost"
+user = "sys"
+password = "exasol"
+"#,
+    );
+
+    fixtures::exapump()
+        .env("EXAPUMP_CONFIG", config_path.to_str().unwrap())
+        .args(["profile", "show", "demo"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("certificate_fingerprint").not());
+}
+
 /// Config with multiple profiles where NONE has `default = true`.
 /// Should error with "No default profile set".
 #[test]

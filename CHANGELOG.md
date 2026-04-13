@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.4
+
+- Pin TLS connections to a server certificate via `--certificate-fingerprint` flag and `certificate_fingerprint` profile field (SHA-256 hex of DER)
+- Bump exarrow-rs to 0.7.3
+
 ## 0.7.2
 
 - Bump exarrow-rs to 0.7.0

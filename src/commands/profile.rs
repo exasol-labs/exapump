@@ -30,6 +30,9 @@ pub enum ProfileCommands {
         tls: Option<bool>,
         #[arg(long)]
         validate_certificate: Option<bool>,
+        /// SHA-256 hex fingerprint of the server's DER certificate (pins TLS to a specific cert)
+        #[arg(long)]
+        certificate_fingerprint: Option<String>,
         /// Mark this profile as the default connection
         #[arg(long)]
         default: bool,
@@ -68,6 +71,7 @@ struct ProfileOverrides {
     schema: Option<String>,
     tls: Option<bool>,
     validate_certificate: Option<bool>,
+    certificate_fingerprint: Option<String>,
     bfs_host: Option<String>,
     bfs_port: Option<u16>,
     bfs_bucket: Option<String>,
@@ -90,6 +94,7 @@ pub fn run(args: ProfileArgs) -> anyhow::Result<()> {
             schema,
             tls,
             validate_certificate,
+            certificate_fingerprint,
             default,
             bfs_host,
             bfs_port,
@@ -107,6 +112,7 @@ pub fn run(args: ProfileArgs) -> anyhow::Result<()> {
                 schema,
                 tls,
                 validate_certificate,
+                certificate_fingerprint,
                 bfs_host,
                 bfs_port,
                 bfs_bucket,
@@ -161,6 +167,9 @@ fn show(name: &str) -> anyhow::Result<()> {
                 "  validate_certificate: {}",
                 profile.validate_certificate.unwrap_or(true)
             );
+            if let Some(ref fingerprint) = profile.certificate_fingerprint {
+                println!("  certificate_fingerprint: {}", fingerprint);
+            }
             println!("  default: {}", profile.default.unwrap_or(false));
             if let Some(ref bfs_host) = profile.bfs_host {
                 println!("  bfs_host: {}", bfs_host);
@@ -221,6 +230,7 @@ fn add(name: &str, overrides: ProfileOverrides, set_default: bool) -> anyhow::Re
             validate_certificate: overrides
                 .validate_certificate
                 .or(preset.validate_certificate),
+            certificate_fingerprint: overrides.certificate_fingerprint,
             default: default_field,
             bfs_host: overrides.bfs_host,
             bfs_port: overrides.bfs_port,
@@ -249,6 +259,7 @@ fn add(name: &str, overrides: ProfileOverrides, set_default: bool) -> anyhow::Re
             schema: overrides.schema,
             tls: overrides.tls,
             validate_certificate: overrides.validate_certificate,
+            certificate_fingerprint: overrides.certificate_fingerprint,
             default: default_field,
             bfs_host: overrides.bfs_host,
             bfs_port: overrides.bfs_port,

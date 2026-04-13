@@ -73,6 +73,7 @@ The `profile` subcommand is available as `exapump profile`. It does not require 
 * *WHEN* the user runs `exapump profile show <name>`
 * *THEN* the output MUST show the profile name, host, port, user, TLS setting, and certificate validation setting
 * *AND* the password MUST be masked (e.g., `****`)
+* *AND* if `certificate_fingerprint` is set, the output MUST show it (in full, since it is a public identifier)
 
 ### Scenario: Profile show for missing profile
 
@@ -131,3 +132,10 @@ The `profile` subcommand is available as `exapump profile`. It does not require 
 * *WHEN* the user runs `exapump profile add` without a profile name
 * *THEN* the CLI MUST exit with a non-zero code
 * *AND* stderr MUST indicate a profile name is required
+
+### Scenario: Profile add accepts --certificate-fingerprint
+
+* *GIVEN* exapump is installed
+* *WHEN* the user runs `exapump profile add staging --host exa.example.com --user u --password p --certificate-fingerprint deadbeefcafebabe`
+* *THEN* the `[staging]` section MUST be written with `certificate_fingerprint = "deadbeefcafebabe"`
+* *AND* stdout MUST confirm the profile was added
