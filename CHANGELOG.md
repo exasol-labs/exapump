@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.0
+
+- Bump exarrow-rs to 0.8.0 (driver now defaults `tls=true`)
+- Profile DSNs omit `tls` and `validateservercertificate` when unset; driver applies secure defaults
+
 ## 0.7.5
 
 - Strip SQL line (`--`) and block (`/* ... */`) comments from `sql` command input before execution (#8)

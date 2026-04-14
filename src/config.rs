@@ -78,9 +78,6 @@ impl Profile {
 
     pub fn to_dsn(&self) -> String {
         let port = self.port.unwrap_or(DEFAULT_PORT);
-        let tls = self.tls.unwrap_or(true);
-        let validate = self.validate_certificate.unwrap_or(true);
-        let validate_int = if validate { 1 } else { 0 };
 
         let mut dsn = format!(
             "exasol://{}:{}@{}:{}",
@@ -92,13 +89,29 @@ impl Profile {
             dsn.push_str(schema);
         }
 
-        dsn.push_str(&format!(
-            "?tls={}&validateservercertificate={}",
-            tls, validate_int
-        ));
+        let mut first_param = true;
+        let mut push_param = |dsn: &mut String, key: &str, value: &str| {
+            dsn.push(if first_param { '?' } else { '&' });
+            first_param = false;
+            dsn.push_str(key);
+            dsn.push('=');
+            dsn.push_str(value);
+        };
+
+        if let Some(tls) = self.tls {
+            push_param(&mut dsn, "tls", if tls { "true" } else { "false" });
+        }
+
+        if let Some(validate) = self.validate_certificate {
+            push_param(
+                &mut dsn,
+                "validateservercertificate",
+                if validate { "1" } else { "0" },
+            );
+        }
 
         if let Some(ref fingerprint) = self.certificate_fingerprint {
-            dsn.push_str(&format!("&certificate_fingerprint={}", fingerprint));
+            push_param(&mut dsn, "certificate_fingerprint", fingerprint);
         }
 
         dsn
@@ -540,7 +553,7 @@ validate_certificate = false
     }
 
     #[test]
-    fn tls_defaults_to_true() {
+    fn tls_unset_omits_tls_param() {
         let profile = Profile {
             host: "myhost".to_string(),
             port: Some(8563),
@@ -561,11 +574,11 @@ validate_certificate = false
         };
 
         let dsn = profile.to_dsn();
-        assert!(dsn.contains("tls=true"));
+        assert!(!dsn.contains("tls="), "got: {dsn}");
     }
 
     #[test]
-    fn validate_certificate_defaults_to_true() {
+    fn validate_certificate_unset_omits_param() {
         let profile = Profile {
             host: "myhost".to_string(),
             port: Some(8563),
@@ -586,7 +599,53 @@ validate_certificate = false
         };
 
         let dsn = profile.to_dsn();
-        assert!(dsn.contains("validateservercertificate=1"));
+        assert!(!dsn.contains("validateservercertificate"), "got: {dsn}");
+    }
+
+    #[test]
+    fn profile_without_tls_fields_produces_bare_dsn() {
+        let profile = Profile {
+            host: "myhost".to_string(),
+            port: Some(8563),
+            user: "u".to_string(),
+            password: "p".to_string(),
+            schema: None,
+            tls: None,
+            validate_certificate: None,
+            certificate_fingerprint: None,
+            default: None,
+            bfs_host: None,
+            bfs_port: None,
+            bfs_bucket: None,
+            bfs_write_password: None,
+            bfs_read_password: None,
+            bfs_tls: None,
+            bfs_validate_certificate: None,
+        };
+
+        assert_eq!(profile.to_dsn(), "exasol://u:p@myhost:8563");
+    }
+
+    #[test]
+    fn tls_only_emits_single_param() {
+        let mut profile = minimal_profile();
+        profile.tls = Some(false);
+        profile.validate_certificate = None;
+
+        let dsn = profile.to_dsn();
+        assert!(dsn.contains("tls=false"), "got: {dsn}");
+        assert!(!dsn.contains("validateservercertificate"), "got: {dsn}");
+    }
+
+    #[test]
+    fn validate_certificate_only_emits_single_param() {
+        let mut profile = minimal_profile();
+        profile.tls = None;
+        profile.validate_certificate = Some(false);
+
+        let dsn = profile.to_dsn();
+        assert!(dsn.contains("validateservercertificate=0"), "got: {dsn}");
+        assert!(!dsn.contains("tls="), "got: {dsn}");
     }
 
     #[test]
