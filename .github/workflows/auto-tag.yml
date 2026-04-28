@@ -47,8 +47,8 @@ jobs:
             cross: false
             name: exapump-linux-x86_64
           - target: aarch64-unknown-linux-gnu
-            os: ubuntu-latest
-            cross: true
+            os: ubuntu-24.04-arm
+            cross: false
             name: exapump-linux-aarch64
           - target: x86_64-apple-darwin
             os: macos-latest
