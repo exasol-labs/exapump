@@ -1,15 +1,10 @@
-# Feature: Shared Connection Args
+# Feature: DSN Resolution
 
-All subcommands that connect to Exasol share a common set of connection arguments. These are encapsulated in a `ConnectionArgs` struct that is flattened into each subcommand's args via clap. A `.env` file in the working directory is auto-loaded at startup to supply environment variables like `EXAPUMP_DSN`.
+All subcommands that connect to Exasol share a common set of connection arguments. These are encapsulated in a `ConnectionArgs` struct that is flattened into each subcommand's args via clap. A `.env` file in the working directory is auto-loaded at startup to supply environment variables like `EXAPUMP_DSN`. DSN resolution follows a priority order: CLI flag > shell environment > `.env` file > config profile.
 
 ## Background
 
-Connection arguments (`--dsn`, `--profile`, and env file loading) are shared across the `upload`, `export`, `sql`, and `interactive` subcommands. The `.env` file is loaded before clap parses arguments, so that `env = "EXAPUMP_DSN"` picks up values from both the `.env` file and the shell environment. The `--dsn` flag is now optional — if omitted, connection parameters are resolved from a config file profile.
-
-The resolution priority (highest to lowest) is:
-1. `--dsn` CLI flag
-2. `EXAPUMP_DSN` environment variable (shell or `.env` file)
-3. Config file profile (selected via `--profile` or default profile)
+Connection arguments (`--dsn`, `--profile`, and `--certificate-fingerprint`) are shared across the `upload`, `export`, `sql`, and `interactive` subcommands. The `--certificate-fingerprint` flag pins the TLS connection to a SHA-256 hex fingerprint of the server's DER certificate and is appended to the resolved DSN using `?` / `&` separator rules.
 
 ## Scenarios
 
