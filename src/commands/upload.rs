@@ -78,7 +78,8 @@ async fn parquet_import(path: &std::path::Path, args: &UploadArgs) -> anyhow::Re
     conn.execute(&ddl).await?;
 
     let options = exarrow_rs::ParquetImportOptions::new()
-        .with_column_name_mode(exarrow_rs::types::ColumnNameMode::Quoted);
+        .with_column_name_mode(exarrow_rs::types::ColumnNameMode::Quoted)
+        .with_native_parquet(Some(false));
 
     let rows = conn.import_from_parquet(&args.table, path, options).await?;
 

@@ -1,4 +1,12 @@
-use clap::Args;
+use clap::{Args, ValueEnum};
+
+#[derive(ValueEnum, Clone, Copy, Default, PartialEq, Eq, Debug)]
+#[value(rename_all = "lowercase")]
+pub enum Transport {
+    #[default]
+    Native,
+    Websocket,
+}
 
 #[derive(Args)]
 pub struct ConnectionArgs {
@@ -13,16 +21,18 @@ pub struct ConnectionArgs {
     /// Pin the TLS connection to the SHA-256 hex fingerprint of the server's DER certificate
     #[arg(long)]
     pub certificate_fingerprint: Option<String>,
+
+    /// Wire transport to use: `native` (default) or `websocket`
+    #[arg(long, value_enum, default_value_t = Transport::Native)]
+    pub transport: Transport,
 }
 
 impl ConnectionArgs {
     pub fn resolve_dsn(&self) -> anyhow::Result<String> {
         // Priority 1 & 2: --dsn flag or EXAPUMP_DSN env var (both handled by clap)
         if let Some(ref dsn) = self.dsn {
-            return Ok(append_fingerprint(
-                dsn,
-                self.certificate_fingerprint.as_deref(),
-            ));
+            let with_fp = append_fingerprint(dsn, self.certificate_fingerprint.as_deref());
+            return Ok(append_transport(&with_fp, self.transport));
         }
 
         // Priority 3: --profile <name>
@@ -30,14 +40,20 @@ impl ConnectionArgs {
 
         if let Some(ref name) = self.profile {
             return match config.get(name) {
-                Some(profile) => Ok(self.profile_to_dsn(profile)),
+                Some(profile) => Ok(append_transport(
+                    &self.profile_to_dsn(profile),
+                    self.transport,
+                )),
                 None => anyhow::bail!("Profile '{}' not found in config", name),
             };
         }
 
         // Priority 4: find default profile (auto-default for single profile, or `default = true`)
         let (_, profile) = crate::config::find_default_profile(&config)?;
-        Ok(self.profile_to_dsn(profile))
+        Ok(append_transport(
+            &self.profile_to_dsn(profile),
+            self.transport,
+        ))
     }
 
     fn profile_to_dsn(&self, profile: &crate::config::Profile) -> String {
@@ -66,6 +82,16 @@ fn append_fingerprint(dsn: &str, fingerprint: Option<&str>) -> String {
             format!("{}{}certificate_fingerprint={}", dsn, separator, fp)
         }
         None => dsn.to_string(),
+    }
+}
+
+fn append_transport(dsn: &str, transport: Transport) -> String {
+    match transport {
+        Transport::Native => dsn.to_string(),
+        Transport::Websocket => {
+            let separator = if dsn.contains('?') { '&' } else { '?' };
+            format!("{}{}transport=websocket", dsn, separator)
+        }
     }
 }
 
@@ -126,6 +152,7 @@ mod tests {
             dsn: None,
             profile: None,
             certificate_fingerprint: Some("bbbbbb".to_string()),
+            transport: Transport::Native,
         };
         let profile = profile_with_fingerprint(Some("aaaaaa"));
         let dsn = args.profile_to_dsn(&profile);
@@ -142,6 +169,7 @@ mod tests {
             dsn: None,
             profile: None,
             certificate_fingerprint: None,
+            transport: Transport::Native,
         };
         let profile = profile_with_fingerprint(Some("ccdd11"));
         let dsn = args.profile_to_dsn(&profile);
@@ -154,9 +182,66 @@ mod tests {
             dsn: None,
             profile: None,
             certificate_fingerprint: None,
+            transport: Transport::Native,
         };
         let profile = profile_with_fingerprint(None);
         let dsn = args.profile_to_dsn(&profile);
         assert!(!dsn.contains("certificate_fingerprint"), "got: {dsn}");
+    }
+
+    #[test]
+    fn default_transport_native_omits_param() {
+        let dsn = "exasol://user:pwd@host:8563";
+        let result = append_transport(dsn, Transport::Native);
+        assert_eq!(result, dsn);
+    }
+
+    #[test]
+    fn transport_native_omits_param_when_query_present() {
+        let dsn = "exasol://user:pwd@host:8563?tls=true";
+        let result = append_transport(dsn, Transport::Native);
+        assert_eq!(result, dsn);
+    }
+
+    #[test]
+    fn transport_websocket_adds_query_separator_when_absent() {
+        let dsn = "exasol://user:pwd@host:8563";
+        let result = append_transport(dsn, Transport::Websocket);
+        assert_eq!(result, "exasol://user:pwd@host:8563?transport=websocket");
+    }
+
+    #[test]
+    fn transport_websocket_appends_when_query_present() {
+        let dsn = "exasol://user:pwd@host:8563?tls=true&validateservercertificate=0";
+        let result = append_transport(dsn, Transport::Websocket);
+        assert_eq!(
+            result,
+            "exasol://user:pwd@host:8563?tls=true&validateservercertificate=0&transport=websocket"
+        );
+    }
+
+    #[test]
+    fn transport_websocket_coexists_with_fingerprint() {
+        let dsn = "exasol://user:pwd@host:8563";
+        let with_fp = append_fingerprint(dsn, Some("deadbeef"));
+        let result = append_transport(&with_fp, Transport::Websocket);
+        assert_eq!(
+            result,
+            "exasol://user:pwd@host:8563?certificate_fingerprint=deadbeef&transport=websocket"
+        );
+    }
+
+    #[test]
+    fn transport_websocket_applies_to_profile_dsn() {
+        let args = ConnectionArgs {
+            dsn: None,
+            profile: None,
+            certificate_fingerprint: None,
+            transport: Transport::Websocket,
+        };
+        let profile = profile_with_fingerprint(None);
+        let base_dsn = args.profile_to_dsn(&profile);
+        let result = append_transport(&base_dsn, args.transport);
+        assert!(result.contains("transport=websocket"), "got: {result}");
     }
 }

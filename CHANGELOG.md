@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.0
+
+- Bump exarrow-rs to 0.12.0 (introduces native and websocket Cargo features)
+- Add `--transport native|websocket` flag on all connection-bearing subcommands (`upload`, `sql`, `export`, `interactive`)
+- Default transport is `native` (aligned with exarrow-rs 0.12 upstream default)
+
 ## 0.8.0
 
 - Bump exarrow-rs to 0.8.0 (driver now defaults `tls=true`)

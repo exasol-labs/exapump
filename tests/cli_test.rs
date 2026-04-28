@@ -591,6 +591,38 @@ fn profile_add_help_includes_certificate_fingerprint() {
 }
 
 #[test]
+fn transport_flag_in_help_for_all_commands() {
+    for cmd in ["upload", "sql", "export", "interactive"] {
+        fixtures::exapump()
+            .args([cmd, "--help"])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("--transport"))
+            .stdout(predicate::str::contains("native"))
+            .stdout(predicate::str::contains("websocket"));
+    }
+}
+
+#[test]
+fn invalid_transport_value_is_rejected() {
+    fixtures::exapump()
+        .args([
+            "sql",
+            "--transport",
+            "http",
+            "--dsn",
+            "exasol://x:y@host:8563",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("native").and(predicate::str::contains("websocket")))
+        .stderr(
+            predicate::str::contains("invalid value")
+                .or(predicate::str::contains("possible values")),
+        );
+}
+
+#[test]
 fn profile_add_help_includes_bucketfs_flags() {
     fixtures::exapump()
         .args(["profile", "add", "--help"])
