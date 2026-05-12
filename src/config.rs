@@ -169,6 +169,21 @@ pub fn save_config(config: &Config) -> anyhow::Result<()> {
     }
     let content = toml::to_string(config)?;
     std::fs::write(&path, content)?;
+    restrict_config_perms(&path)?;
+    Ok(())
+}
+
+#[cfg(unix)]
+fn restrict_config_perms(path: &std::path::Path) -> anyhow::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let mut perms = std::fs::metadata(path)?.permissions();
+    perms.set_mode(0o600);
+    std::fs::set_permissions(path, perms)?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn restrict_config_perms(_path: &std::path::Path) -> anyhow::Result<()> {
     Ok(())
 }
 
