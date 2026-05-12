@@ -104,9 +104,54 @@ exapump profile list
 # Show profile details (password masked)
 exapump profile show production
 
-# Remove a profile
+# Remove a profile (prompts for confirmation in a TTY; pass --yes for scripts)
 exapump profile remove production
+exapump profile remove production --yes
 ```
+
+### Hidden Password Prompt
+
+Omit `--password` when running `profile add` in an interactive terminal and exapump will prompt for it on a hidden TTY line — the password never appears on the command line, in shell history, or in any agent transcript:
+
+```bash
+exapump profile add production \
+  --host exasol-prod.example.com \
+  --user admin \
+  --schema my_schema \
+  --default
+# Password for profile 'production': (input hidden)
+```
+
+The saved config file is written with `0600` permissions on unix so only your user can read it.
+
+In non-interactive contexts (CI, pipes), `profile add` without `--password` fails with a clear error. Use `profile init` for the guided wizard or pass `--password` explicitly.
+
+### Interactive Wizards
+
+`profile init` is a fully guided wizard for cold-start setup. Pre-fill any subset of fields on the command line and the wizard prompts for the rest; the password is always asked via the hidden TTY prompt:
+
+```bash
+# Cold start — wizard asks everything
+exapump profile init
+
+# Pre-fill non-secret fields, only password is prompted
+exapump profile init production \
+  --host exasol-prod.example.com \
+  --port 8563 \
+  --user admin \
+  --schema my_schema \
+  --no-bucketfs \
+  --default
+```
+
+`profile edit NAME` lets you update an existing profile interactively. Each field defaults to the current value — press Enter to keep it. Password changes are gated behind a `Change password?` confirm so you can leave the existing password untouched:
+
+```bash
+exapump profile edit production
+exapump profile edit production --no-bucketfs   # skip BucketFS section
+```
+
+Both `init` and `edit` require an interactive terminal and refuse to run otherwise. For scripted setups, use `profile add` with explicit flags.
 
 ## Docker Presets
 

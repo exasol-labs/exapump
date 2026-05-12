@@ -344,3 +344,10 @@ bfs_validate_certificate = false
 * *GIVEN* a profile named `nopin` with no `certificate_fingerprint` field
 * *WHEN* exapump generates the DSN for the profile
 * *THEN* the DSN MUST NOT contain a `certificate_fingerprint` parameter
+
+### Scenario: Saved config file is restricted to the owning user on unix
+
+* *GIVEN* exapump is running on a unix-like operating system
+* *WHEN* exapump writes (or rewrites) `~/.exapump/config.toml` from any subcommand that mutates profiles (`add`, `init`, `edit`, `remove`)
+* *THEN* the file mode MUST be `0600` (read/write for the owning user only)
+* *AND* on non-unix platforms exapump MUST NOT fail because of permission handling
