@@ -1,3 +1,5 @@
+use std::io::IsTerminal;
+
 use crate::config::{self, Profile};
 
 #[derive(clap::Args)]
@@ -59,7 +61,41 @@ pub enum ProfileCommands {
         bfs_validate_certificate: Option<bool>,
     },
     /// Remove a profile
-    Remove { name: String },
+    Remove {
+        name: String,
+        /// Skip the interactive confirmation prompt
+        #[arg(short = 'y', long)]
+        yes: bool,
+    },
+    /// Interactively edit an existing profile (current values shown as defaults)
+    Edit {
+        name: String,
+        /// Skip the optional BucketFS edit prompts
+        #[arg(long)]
+        no_bucketfs: bool,
+    },
+    /// Interactively create a profile (secure password prompt, no plaintext on command line)
+    Init {
+        /// Profile name (prompted if omitted)
+        name: Option<String>,
+        #[arg(long)]
+        host: Option<String>,
+        #[arg(long)]
+        port: Option<u16>,
+        #[arg(long)]
+        user: Option<String>,
+        #[arg(long)]
+        schema: Option<String>,
+        /// SHA-256 hex fingerprint of the server's DER certificate (pins TLS to a specific cert)
+        #[arg(long)]
+        certificate_fingerprint: Option<String>,
+        /// Mark this profile as the default connection (skips the confirm prompt)
+        #[arg(long)]
+        default: bool,
+        /// Skip the optional BucketFS configuration prompts
+        #[arg(long)]
+        no_bucketfs: bool,
+    },
 }
 
 #[derive(Default)]
@@ -123,8 +159,39 @@ pub fn run(args: ProfileArgs) -> anyhow::Result<()> {
             };
             add(&name, overrides, default)
         }
-        ProfileCommands::Remove { name } => remove(&name),
+        ProfileCommands::Remove { name, yes } => remove(&name, yes),
+        ProfileCommands::Edit { name, no_bucketfs } => edit(&name, no_bucketfs),
+        ProfileCommands::Init {
+            name,
+            host,
+            port,
+            user,
+            schema,
+            certificate_fingerprint,
+            default,
+            no_bucketfs,
+        } => init(InitArgs {
+            name,
+            host,
+            port,
+            user,
+            schema,
+            certificate_fingerprint,
+            default,
+            no_bucketfs,
+        }),
     }
+}
+
+struct InitArgs {
+    name: Option<String>,
+    host: Option<String>,
+    port: Option<u16>,
+    user: Option<String>,
+    schema: Option<String>,
+    certificate_fingerprint: Option<String>,
+    default: bool,
+    no_bucketfs: bool,
 }
 
 fn list() -> anyhow::Result<()> {
@@ -248,9 +315,10 @@ fn add(name: &str, overrides: ProfileOverrides, set_default: bool) -> anyhow::Re
         let user = overrides.user.ok_or_else(|| {
             anyhow::anyhow!("--user is required when adding a non-default profile")
         })?;
-        let password = overrides.password.ok_or_else(|| {
-            anyhow::anyhow!("--password is required when adding a non-default profile")
-        })?;
+        let password = match overrides.password {
+            Some(p) => p,
+            None => prompt_password_for(name)?,
+        };
         Profile {
             host,
             port: overrides.port,
@@ -299,12 +367,538 @@ fn add(name: &str, overrides: ProfileOverrides, set_default: bool) -> anyhow::Re
     Ok(())
 }
 
-fn remove(name: &str) -> anyhow::Result<()> {
+fn init(args: InitArgs) -> anyhow::Result<()> {
+    if !std::io::stdin().is_terminal() {
+        anyhow::bail!(
+            "`exapump profile init` requires an interactive terminal. \
+             Use `exapump profile add` with explicit flags for scripted setups."
+        );
+    }
+
+    let existing = config::load_config()?;
+
+    let name = match args.name {
+        Some(n) => {
+            config::validate_profile_name(&n)?;
+            n
+        }
+        None => prompt_profile_name(&existing)?,
+    };
+    config::validate_profile_name(&name)?;
+    if existing.contains_key(&name) {
+        anyhow::bail!(
+            "Profile '{}' already exists. Remove it first with `exapump profile remove {}`",
+            name,
+            name
+        );
+    }
+
+    let host = match args.host {
+        Some(h) => h,
+        None => inquire_text("Host", None, true)?,
+    };
+    let port = match args.port {
+        Some(p) => p,
+        None => inquire_port()?,
+    };
+    let user = match args.user {
+        Some(u) => u,
+        None => inquire_text("User", None, true)?,
+    };
+
+    let password = prompt_new_password()?;
+
+    let schema = match args.schema {
+        Some(s) if s.is_empty() => None,
+        Some(s) => Some(s),
+        None => {
+            let s = inquire_text("Schema (optional)", Some(""), false)?;
+            if s.is_empty() {
+                None
+            } else {
+                Some(s)
+            }
+        }
+    };
+
+    let tls = inquire_confirm("Enable TLS?", true)?;
+    let validate_certificate = inquire_confirm("Validate server certificate?", true)?;
+
+    let make_default = if args.default || existing.is_empty() {
+        true
+    } else {
+        inquire_confirm("Set as the default profile?", false)?
+    };
+
+    let (
+        bfs_host,
+        bfs_port,
+        bfs_bucket,
+        bfs_write_password,
+        bfs_read_password,
+        bfs_tls,
+        bfs_validate_certificate,
+    ) = if args.no_bucketfs {
+        (None, None, None, None, None, None, None)
+    } else {
+        prompt_bucketfs()?
+    };
+
+    let profile = Profile {
+        host,
+        port: Some(port),
+        user,
+        password,
+        schema,
+        tls: Some(tls),
+        validate_certificate: Some(validate_certificate),
+        certificate_fingerprint: args.certificate_fingerprint,
+        default: if make_default { Some(true) } else { None },
+        bfs_host,
+        bfs_port,
+        bfs_bucket,
+        bfs_write_password,
+        bfs_read_password,
+        bfs_tls,
+        bfs_validate_certificate,
+    };
+
+    let mut config = existing;
+    if make_default {
+        for (_, existing_profile) in config.iter_mut() {
+            existing_profile.default = None;
+        }
+    }
+    config.insert(name.clone(), profile);
+    config::save_config(&config)?;
+
+    let default_suffix = if make_default {
+        " (set as default)"
+    } else {
+        ""
+    };
+    println!("Profile '{}' created{}", name, default_suffix);
+    Ok(())
+}
+
+fn inquire_text(label: &str, default: Option<&str>, required: bool) -> anyhow::Result<String> {
+    let prompt_text = format!("{}:", label);
+    let mut prompt = inquire::Text::new(&prompt_text);
+    if let Some(d) = default {
+        prompt = prompt.with_default(d);
+    }
+    let value = prompt.prompt().map_err(map_inquire_err)?;
+    if required && value.trim().is_empty() {
+        anyhow::bail!("{} is required", label);
+    }
+    Ok(value)
+}
+
+fn inquire_confirm(label: &str, default: bool) -> anyhow::Result<bool> {
+    inquire::Confirm::new(label)
+        .with_default(default)
+        .prompt()
+        .map_err(map_inquire_err)
+}
+
+fn inquire_port() -> anyhow::Result<u16> {
+    loop {
+        let raw = inquire::Text::new("Port:")
+            .with_default(&config::DEFAULT_PORT.to_string())
+            .prompt()
+            .map_err(map_inquire_err)?;
+        match raw.trim().parse::<u16>() {
+            Ok(p) if p > 0 => return Ok(p),
+            _ => println!("  not a valid port — enter 1..65535"),
+        }
+    }
+}
+
+fn prompt_profile_name(existing: &config::Config) -> anyhow::Result<String> {
+    loop {
+        let default = if existing.is_empty() { "default" } else { "" };
+        let mut p = inquire::Text::new("Profile name:");
+        if !default.is_empty() {
+            p = p.with_default(default);
+        }
+        let name = p.prompt().map_err(map_inquire_err)?;
+        match config::validate_profile_name(&name) {
+            Ok(_) => {
+                if existing.contains_key(&name) {
+                    println!("  '{}' already exists — choose another name", name);
+                    continue;
+                }
+                return Ok(name);
+            }
+            Err(e) => println!("  {}", e),
+        }
+    }
+}
+
+fn prompt_new_password() -> anyhow::Result<String> {
+    loop {
+        let pw = rpassword::prompt_password("Password: ")?;
+        if pw.is_empty() {
+            println!("  password cannot be empty");
+            continue;
+        }
+        let confirm = rpassword::prompt_password("Confirm password: ")?;
+        if pw == confirm {
+            return Ok(pw);
+        }
+        println!("  passwords did not match — try again");
+    }
+}
+
+#[allow(clippy::type_complexity)]
+fn prompt_bucketfs() -> anyhow::Result<(
+    Option<String>,
+    Option<u16>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<bool>,
+    Option<bool>,
+)> {
+    if !inquire_confirm(
+        "Configure BucketFS? (needed for `exapump bucketfs` commands)",
+        false,
+    )? {
+        return Ok((None, None, None, None, None, None, None));
+    }
+
+    let host_raw = inquire_text(
+        "BucketFS host (blank = same as profile host)",
+        Some(""),
+        false,
+    )?;
+    let bfs_host = if host_raw.is_empty() {
+        None
+    } else {
+        Some(host_raw)
+    };
+
+    let port_raw = inquire::Text::new("BucketFS port:")
+        .with_default(&config::DEFAULT_BFS_PORT.to_string())
+        .prompt()
+        .map_err(map_inquire_err)?;
+    let bfs_port = match port_raw.trim().parse::<u16>() {
+        Ok(p) if p > 0 => Some(p),
+        _ => anyhow::bail!("invalid BucketFS port: {}", port_raw),
+    };
+
+    let bucket = inquire::Text::new("Bucket name:")
+        .with_default("default")
+        .prompt()
+        .map_err(map_inquire_err)?;
+    let bfs_bucket = Some(bucket);
+
+    let bfs_write_password = {
+        let pw = rpassword::prompt_password("BucketFS write password (blank to skip): ")?;
+        if pw.is_empty() {
+            None
+        } else {
+            Some(pw)
+        }
+    };
+    let bfs_read_password = {
+        let pw = rpassword::prompt_password(
+            "BucketFS read password (blank = same as write password): ",
+        )?;
+        if pw.is_empty() {
+            None
+        } else {
+            Some(pw)
+        }
+    };
+
+    Ok((
+        bfs_host,
+        bfs_port,
+        bfs_bucket,
+        bfs_write_password,
+        bfs_read_password,
+        None,
+        None,
+    ))
+}
+
+fn map_inquire_err(e: inquire::InquireError) -> anyhow::Error {
+    use inquire::InquireError;
+    match e {
+        InquireError::OperationCanceled | InquireError::OperationInterrupted => {
+            anyhow::anyhow!("cancelled")
+        }
+        other => anyhow::anyhow!(other),
+    }
+}
+
+fn prompt_password_for(name: &str) -> anyhow::Result<String> {
+    if !std::io::stdin().is_terminal() {
+        anyhow::bail!(
+            "--password is required when adding a non-default profile. \
+             Pass --password, set it in a TTY (exapump will prompt), \
+             or use `exapump profile init` for the guided wizard."
+        );
+    }
+    let prompt = format!("Password for profile '{}': ", name);
+    let pw = rpassword::prompt_password(&prompt)?;
+    if pw.is_empty() {
+        anyhow::bail!("Password cannot be empty");
+    }
+    Ok(pw)
+}
+
+fn remove(name: &str, yes: bool) -> anyhow::Result<()> {
     let mut config = config::load_config()?;
-    if config.remove(name).is_none() {
+    if !config.contains_key(name) {
         anyhow::bail!("Profile '{}' not found", name);
     }
+
+    if !yes {
+        if !std::io::stdin().is_terminal() {
+            anyhow::bail!(
+                "Refusing to remove '{}' without confirmation. Pass --yes (-y) in scripted contexts.",
+                name
+            );
+        }
+        let confirmed = inquire::Confirm::new(&format!("Remove profile '{}'?", name))
+            .with_default(false)
+            .prompt()
+            .map_err(map_inquire_err)?;
+        if !confirmed {
+            println!("Cancelled — profile '{}' not removed", name);
+            return Ok(());
+        }
+    }
+
+    config.remove(name);
     config::save_config(&config)?;
     println!("Profile '{}' removed", name);
     Ok(())
+}
+
+fn edit(name: &str, no_bucketfs: bool) -> anyhow::Result<()> {
+    if !std::io::stdin().is_terminal() {
+        anyhow::bail!(
+            "`exapump profile edit` requires an interactive terminal. \
+             Update config.toml directly for scripted edits."
+        );
+    }
+
+    let mut config = config::load_config()?;
+    let current = config
+        .get(name)
+        .ok_or_else(|| anyhow::anyhow!("Profile '{}' not found", name))?
+        .clone();
+
+    println!(
+        "Editing profile '{}' — press Enter to keep current value.",
+        name
+    );
+
+    let host = inquire_text("Host", Some(&current.host), true)?;
+    let current_port_str = current.port.unwrap_or(config::DEFAULT_PORT).to_string();
+    let port = loop {
+        let raw = inquire::Text::new("Port:")
+            .with_default(&current_port_str)
+            .prompt()
+            .map_err(map_inquire_err)?;
+        match raw.trim().parse::<u16>() {
+            Ok(p) if p > 0 => break p,
+            _ => println!("  not a valid port — enter 1..65535"),
+        }
+    };
+    let user = inquire_text("User", Some(&current.user), true)?;
+
+    let change_password =
+        inquire_confirm("Change password? (No keeps the existing password)", false)?;
+    let password = if change_password {
+        prompt_new_password()?
+    } else {
+        current.password.clone()
+    };
+
+    let current_schema = current.schema.clone().unwrap_or_default();
+    let schema_raw = inquire_text("Schema (blank = none)", Some(&current_schema), false)?;
+    let schema = if schema_raw.is_empty() {
+        None
+    } else {
+        Some(schema_raw)
+    };
+
+    let tls = inquire_confirm("Enable TLS?", current.tls.unwrap_or(true))?;
+    let validate_certificate = inquire_confirm(
+        "Validate server certificate?",
+        current.validate_certificate.unwrap_or(true),
+    )?;
+
+    let current_fp = current.certificate_fingerprint.clone().unwrap_or_default();
+    let fp_raw = inquire_text(
+        "Certificate fingerprint (blank = none)",
+        Some(&current_fp),
+        false,
+    )?;
+    let certificate_fingerprint = if fp_raw.is_empty() {
+        None
+    } else {
+        Some(fp_raw)
+    };
+
+    let was_default = current.default.unwrap_or(false);
+    let make_default = inquire_confirm("Set as the default profile?", was_default)?;
+
+    let (
+        bfs_host,
+        bfs_port,
+        bfs_bucket,
+        bfs_write_password,
+        bfs_read_password,
+        bfs_tls,
+        bfs_validate_certificate,
+    ) = if no_bucketfs {
+        (
+            current.bfs_host.clone(),
+            current.bfs_port,
+            current.bfs_bucket.clone(),
+            current.bfs_write_password.clone(),
+            current.bfs_read_password.clone(),
+            current.bfs_tls,
+            current.bfs_validate_certificate,
+        )
+    } else {
+        edit_bucketfs(&current)?
+    };
+
+    let updated = Profile {
+        host,
+        port: Some(port),
+        user,
+        password,
+        schema,
+        tls: Some(tls),
+        validate_certificate: Some(validate_certificate),
+        certificate_fingerprint,
+        default: if make_default { Some(true) } else { None },
+        bfs_host,
+        bfs_port,
+        bfs_bucket,
+        bfs_write_password,
+        bfs_read_password,
+        bfs_tls,
+        bfs_validate_certificate,
+    };
+
+    if make_default {
+        for (existing_name, existing_profile) in config.iter_mut() {
+            if existing_name != name {
+                existing_profile.default = None;
+            }
+        }
+    }
+
+    config.insert(name.to_string(), updated);
+    config::save_config(&config)?;
+
+    let default_suffix = if make_default { " (default)" } else { "" };
+    println!("Profile '{}' updated{}", name, default_suffix);
+    Ok(())
+}
+
+#[allow(clippy::type_complexity)]
+fn edit_bucketfs(
+    current: &Profile,
+) -> anyhow::Result<(
+    Option<String>,
+    Option<u16>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<bool>,
+    Option<bool>,
+)> {
+    let edit_bfs = inquire_confirm("Edit BucketFS settings?", false)?;
+    if !edit_bfs {
+        return Ok((
+            current.bfs_host.clone(),
+            current.bfs_port,
+            current.bfs_bucket.clone(),
+            current.bfs_write_password.clone(),
+            current.bfs_read_password.clone(),
+            current.bfs_tls,
+            current.bfs_validate_certificate,
+        ));
+    }
+
+    let host_default = current.bfs_host.clone().unwrap_or_default();
+    let host_raw = inquire_text(
+        "BucketFS host (blank = same as profile host)",
+        Some(&host_default),
+        false,
+    )?;
+    let bfs_host = if host_raw.is_empty() {
+        None
+    } else {
+        Some(host_raw)
+    };
+
+    let port_default = current
+        .bfs_port
+        .unwrap_or(config::DEFAULT_BFS_PORT)
+        .to_string();
+    let port_raw = inquire::Text::new("BucketFS port:")
+        .with_default(&port_default)
+        .prompt()
+        .map_err(map_inquire_err)?;
+    let bfs_port = match port_raw.trim().parse::<u16>() {
+        Ok(p) if p > 0 => Some(p),
+        _ => anyhow::bail!("invalid BucketFS port: {}", port_raw),
+    };
+
+    let bucket_default = current
+        .bfs_bucket
+        .clone()
+        .unwrap_or_else(|| "default".into());
+    let bucket = inquire::Text::new("Bucket name:")
+        .with_default(&bucket_default)
+        .prompt()
+        .map_err(map_inquire_err)?;
+    let bfs_bucket = Some(bucket);
+
+    let change_write =
+        inquire_confirm("Change BucketFS write password? (No keeps existing)", false)?;
+    let bfs_write_password = if change_write {
+        let pw = rpassword::prompt_password("BucketFS write password (blank = clear): ")?;
+        if pw.is_empty() {
+            None
+        } else {
+            Some(pw)
+        }
+    } else {
+        current.bfs_write_password.clone()
+    };
+
+    let change_read = inquire_confirm("Change BucketFS read password? (No keeps existing)", false)?;
+    let bfs_read_password = if change_read {
+        let pw = rpassword::prompt_password(
+            "BucketFS read password (blank = fall back to write password): ",
+        )?;
+        if pw.is_empty() {
+            None
+        } else {
+            Some(pw)
+        }
+    } else {
+        current.bfs_read_password.clone()
+    };
+
+    Ok((
+        bfs_host,
+        bfs_port,
+        bfs_bucket,
+        bfs_write_password,
+        bfs_read_password,
+        current.bfs_tls,
+        current.bfs_validate_certificate,
+    ))
 }
