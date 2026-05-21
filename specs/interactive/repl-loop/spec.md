@@ -1,10 +1,10 @@
 # Feature: REPL Loop
 
-The interactive REPL reads SQL input line by line, supports multi-line statements terminated by semicolons, executes them against Exasol, and displays results. The loop continues until the user exits.
+The REPL uses rustyline for readline-style editing with persistent history. SQL statements are accumulated across lines until a semicolon is encountered at the end of a line. The connection established at startup is reused for all statements in the session. Statement classification uses the same rules as the `sql` subcommand: leading comments are ignored when determining the statement type, but the original text is sent to Exasol verbatim.
 
 ## Background
 
-The REPL uses rustyline for readline-style editing with persistent history. SQL statements are accumulated across lines until a semicolon is encountered at the end of a line. The connection established at startup is reused for all statements in the session.
+Each accumulated buffer is split into statements with the same comment-aware splitter used by the `sql` subcommand. The REPL classifies each statement and dispatches to the appropriate execution path: `Query` and `Execute` (when a result set is returned) display rows in the active output format; `Dml` displays an affected-rows count; `Ddl` and `Execute` (when no result set is returned) display `OK`.
 
 ## Scenarios
 
@@ -101,3 +101,4 @@ The REPL uses rustyline for readline-style editing with persistent history. SQL 
 * *THEN* the REPL MUST split the input into two statements
 * *AND* the REPL MUST execute both statements sequentially
 * *AND* the REPL MUST display the result of each statement
+
