@@ -218,11 +218,12 @@ fn sql_stdin_dash() {
 }
 
 #[test]
-fn sql_strips_line_comment_from_stdin() {
-    // Piping "-- comment\nSELECT 1" must NOT fail at the input-parsing stage
-    // (i.e. must not hit "No SQL statements to execute"). It fails at connection
-    // against the unreachable dummy DSN, confirming the comment was stripped and
-    // the SELECT reached the executor path.
+fn sql_preserves_leading_line_comment_in_executed_sql() {
+    // The comment-aware scanner finds the SELECT 1 statement despite the leading
+    // line comment. The run must NOT fail with "No SQL statements to execute" —
+    // it must proceed to the connection stage and fail there (dummy DSN).
+    // This proves the comment was preserved (not stripped away causing the scanner
+    // to see an empty input) and the real statement reached the executor path.
     fixtures::exapump()
         .env("EXAPUMP_DSN", fixtures::DUMMY_DSN)
         .arg("sql")
@@ -238,7 +239,12 @@ fn sql_strips_line_comment_from_stdin() {
 }
 
 #[test]
-fn sql_strips_block_comment_from_stdin() {
+fn sql_preserves_multiline_block_comment_in_executed_sql() {
+    // The comment-aware scanner finds the SELECT 1 statement despite the leading
+    // block comment. The run must NOT fail with "No SQL statements to execute" —
+    // it must proceed to the connection stage and fail there (dummy DSN).
+    // This proves the comment did not cause the scanner to return an empty
+    // statement list and the real statement reached the executor path.
     fixtures::exapump()
         .env("EXAPUMP_DSN", fixtures::DUMMY_DSN)
         .arg("sql")
@@ -272,6 +278,85 @@ fn sql_default_format_is_csv() {
         .assert()
         .success()
         .stdout(predicate::str::contains("[default: csv]"));
+}
+
+#[test]
+fn sql_block_comment_hint_classified_as_query_and_preserved() {
+    fixtures::require_exasol!();
+    fixtures::install_crypto_provider();
+
+    fixtures::exapump()
+        .args([
+            "sql",
+            "/*snapshot execution*/ SELECT 1",
+            "--dsn",
+            fixtures::DOCKER_DSN,
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("/*snapshot execution*/"))
+        .stderr(predicate::str::contains("1 rows"))
+        .stdout(predicate::str::contains("1"));
+}
+
+#[tokio::test]
+async fn sql_execute_script_with_returns_table_displays_rows() {
+    fixtures::require_exasol!();
+    let (mut conn, schema_name) = fixtures::setup_exasol_schema("execute_script_rows").await;
+
+    let schema_upper = schema_name.to_uppercase();
+    conn.execute_update(&format!(
+        "CREATE OR REPLACE SCRIPT {schema_upper}.\"HELLO\"() RETURNS TABLE AS\n  local res = query([[SELECT 42 AS val]])\n  return(res)\n"
+    ))
+    .await
+    .unwrap();
+
+    fixtures::exapump()
+        .args([
+            "sql",
+            &format!(r#"EXECUTE SCRIPT {schema_upper}."HELLO"()"#),
+            "--dsn",
+            fixtures::DOCKER_DSN,
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("1 rows"))
+        .stdout(predicate::str::contains("42"));
+
+    conn.execute_update(&format!("DROP SCHEMA IF EXISTS {schema_upper} CASCADE"))
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn sql_execute_script_without_returns_table_displays_ok() {
+    fixtures::require_exasol!();
+    let (mut conn, schema_name) = fixtures::setup_exasol_schema("execute_script_noop").await;
+    let schema_upper = schema_name.to_uppercase();
+
+    conn.execute_update(&format!(
+        r#"CREATE OR REPLACE SCRIPT {schema_upper}."NOOP"() AS
+  -- no-op
+"#
+    ))
+    .await
+    .unwrap();
+
+    fixtures::exapump()
+        .args([
+            "sql",
+            &format!(r#"EXECUTE SCRIPT {schema_upper}."NOOP"()"#),
+            "--dsn",
+            fixtures::DOCKER_DSN,
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("OK"))
+        .stdout(predicate::str::is_empty());
+
+    conn.execute_update(&format!("DROP SCHEMA IF EXISTS {schema_upper} CASCADE"))
+        .await
+        .unwrap();
 }
 
 // --- Export subcommand tests ---
@@ -635,4 +720,52 @@ fn profile_add_help_includes_bucketfs_flags() {
         .stdout(predicate::str::contains("--bfs-read-password"))
         .stdout(predicate::str::contains("--bfs-tls"))
         .stdout(predicate::str::contains("--bfs-validate-certificate"));
+}
+
+#[tokio::test]
+async fn repl_execute_script_with_returns_table_displays_rows() {
+    fixtures::require_exasol!();
+    let (mut conn, schema_name) = fixtures::setup_exasol_schema("repl_exec_rows").await;
+    let schema_upper = schema_name.to_uppercase();
+
+    conn.execute_update(&format!(
+        "CREATE OR REPLACE SCRIPT {schema_upper}.\"HELLO\"() RETURNS TABLE AS\n  local res = query([[SELECT 42 AS val]])\n  return(res)\n"
+    ))
+    .await
+    .unwrap();
+
+    fixtures::exapump()
+        .args(["interactive", "--dsn", fixtures::DOCKER_DSN])
+        .write_stdin(format!("EXECUTE SCRIPT {schema_upper}.\"HELLO\"();\n"))
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("42"));
+
+    conn.execute_update(&format!("DROP SCHEMA IF EXISTS {schema_upper} CASCADE"))
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn repl_execute_script_without_returns_table_displays_ok() {
+    fixtures::require_exasol!();
+    let (mut conn, schema_name) = fixtures::setup_exasol_schema("repl_exec_noop").await;
+    let schema_upper = schema_name.to_uppercase();
+
+    conn.execute_update(&format!(
+        "CREATE OR REPLACE SCRIPT {schema_upper}.\"NOOP\"() AS\n  -- no-op\n"
+    ))
+    .await
+    .unwrap();
+
+    fixtures::exapump()
+        .args(["interactive", "--dsn", fixtures::DOCKER_DSN])
+        .write_stdin(format!("EXECUTE SCRIPT {schema_upper}.\"NOOP\"();\n"))
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("OK"));
+
+    conn.execute_update(&format!("DROP SCHEMA IF EXISTS {schema_upper} CASCADE"))
+        .await
+        .unwrap();
 }

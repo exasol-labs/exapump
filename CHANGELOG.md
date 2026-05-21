@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.1
+
+- Fix SQL classification for statements prefixed with `--` or `/* */` comments (issue #14): comments and hints now reach Exasol verbatim; stripping is done internally for statement-type classification only
+- Add `EXECUTE SCRIPT` support (issue #16): statements are classified as `Execute` and dispatched via `conn.execute`, branching on `result_set.row_count()` to handle both result-set and no-result-set scripts correctly
+- Replace `strip_comments` pre-pass in `sql` and `interactive` with a comment-aware four-state scanner in `split_statements`
+
 ## 0.9.0
 
 - Bump exarrow-rs to 0.12.0 (introduces native and websocket Cargo features)
