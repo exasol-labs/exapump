@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.2
+
+- Bump exarrow-rs to 0.12.3: fixes `?` placeholder collision inside SQL literals/identifiers/comments (#17), `WHERE col IN (...)` returning zero rows over native transport (#18), configurable statement timeout (0.12.1), and security patches for rustls-webpki CVE and rand unsoundness (0.12.2)
+
 ## 0.9.1
 
 - Fix SQL classification for statements prefixed with `--` or `/* */` comments (issue #14): comments and hints now reach Exasol verbatim; stripping is done internally for statement-type classification only
