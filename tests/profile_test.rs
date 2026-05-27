@@ -355,11 +355,20 @@ fn profile_init_non_tty_fails() {
 
 #[cfg(unix)]
 #[test]
-fn saved_config_has_user_only_perms() {
+fn saved_config_warns_on_broad_perms_without_changing_mode() {
     use std::os::unix::fs::PermissionsExt;
     let dir = tempfile::tempdir().unwrap();
-    let config_path = dir.path().join(".exapump").join("config.toml");
-    std::fs::create_dir_all(config_path.parent().unwrap()).unwrap();
+    let config_path = write_config(
+        dir.path(),
+        r#"
+[default]
+host = "localhost"
+port = 8563
+user = "sys"
+password = "exasol"
+"#,
+    );
+    std::fs::set_permissions(&config_path, std::fs::Permissions::from_mode(0o644)).unwrap();
 
     fixtures::exapump()
         .env("EXAPUMP_CONFIG", config_path.to_str().unwrap())
@@ -375,7 +384,9 @@ fn saved_config_has_user_only_perms() {
             "s3cret",
         ])
         .assert()
-        .success();
+        .success()
+        .stderr(predicate::str::contains("Warning: config file"))
+        .stderr(predicate::str::contains("chmod 600"));
 
     let mode = std::fs::metadata(&config_path)
         .unwrap()
@@ -383,8 +394,8 @@ fn saved_config_has_user_only_perms() {
         .mode()
         & 0o777;
     assert_eq!(
-        mode, 0o600,
-        "config file should be chmod 600, got {:o}",
+        mode, 0o644,
+        "config file permissions should remain user-controlled, got {:o}",
         mode
     );
 }

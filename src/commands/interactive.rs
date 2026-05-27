@@ -277,6 +277,42 @@ async fn execute_statement(
             }
             Err(e) => print_error(&e),
         },
+        StatementType::Execute => match conn.execute(stmt).await {
+            Ok(result_set) => {
+                if result_set.is_stream() {
+                    match result_set.fetch_all().await {
+                        Ok(batches) => {
+                            let n = row_count(&batches);
+                            match format {
+                                InteractiveFormat::Table => {
+                                    let tbl = format_table(&batches);
+                                    println!("{}", tbl);
+                                }
+                                InteractiveFormat::Csv => {
+                                    if let Err(e) = write_csv(&batches) {
+                                        eprintln!("Error: {}", e);
+                                    }
+                                }
+                                InteractiveFormat::Json => {
+                                    if let Err(e) = write_json(&batches) {
+                                        eprintln!("Error: {}", e);
+                                    }
+                                }
+                            }
+                            if n == 1 {
+                                println!("1 row");
+                            } else {
+                                println!("{} rows", n);
+                            }
+                        }
+                        Err(e) => print_error(&e),
+                    }
+                } else {
+                    println!("OK");
+                }
+            }
+            Err(e) => print_error(&e),
+        },
     }
 }
 
@@ -290,6 +326,7 @@ fn print_error(error: &exarrow_rs::QueryError) {
 
 #[cfg(test)]
 mod tests {
+    use super::super::sql::StatementType;
     use super::*;
     use arrow::array::{Int64Array, StringArray};
     use arrow::datatypes::{DataType, Field, Schema};
@@ -505,5 +542,21 @@ mod tests {
     #[test]
     fn row_count_empty() {
         assert_eq!(row_count(&[]), 0);
+    }
+
+    #[test]
+    fn repl_classify_block_comment_hint_prefix_is_query() {
+        assert_eq!(
+            StatementType::from_sql("/*snapshot execution*/ SELECT 1"),
+            StatementType::Query
+        );
+    }
+
+    #[test]
+    fn repl_classify_line_comment_prefix_is_query() {
+        assert_eq!(
+            StatementType::from_sql("-- a comment\nSELECT 1"),
+            StatementType::Query
+        );
     }
 }

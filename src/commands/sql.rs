@@ -33,9 +33,8 @@ pub fn strip_comments(input: &str) -> String {
             continue;
         }
 
-        // Line comment: --
         if c == '-' && chars.peek() == Some(&'-') {
-            chars.next(); // consume second '-'
+            chars.next();
             out.push(' ');
             while let Some(&next) = chars.peek() {
                 if next == '\n' {
@@ -46,9 +45,8 @@ pub fn strip_comments(input: &str) -> String {
             continue;
         }
 
-        // Block comment: /* ... */
         if c == '/' && chars.peek() == Some(&'*') {
-            chars.next(); // consume '*'
+            chars.next();
             out.push(' ');
             let mut prev = '\0';
             for next in chars.by_ref() {
@@ -72,61 +70,120 @@ pub fn strip_comments(input: &str) -> String {
     out
 }
 
-/// Split SQL input on semicolons, respecting single-quoted and double-quoted strings.
-/// Trailing semicolons produce no empty statements. Whitespace-only statements are skipped.
+/// Split SQL input on semicolons using a comment-aware scanner that tracks
+/// single-quote, double-quote, line-comment, and block-comment states.
+///
+/// Comments are preserved verbatim in the returned statements. Semicolons
+/// inside string literals or comments do not split. Statements whose only
+/// content is whitespace and/or comments are skipped. Unterminated block
+/// comments run to the end of input.
 pub fn split_statements(input: &str) -> Vec<String> {
+    enum ScanState {
+        Normal,
+        SingleQuote,
+        DoubleQuote,
+        LineComment,
+        BlockComment,
+    }
+
     let mut statements = Vec::new();
     let mut current = String::new();
-    let mut in_single_quote = false;
-    let mut in_double_quote = false;
+    let mut state = ScanState::Normal;
+    let mut chars = input.chars().peekable();
 
-    for ch in input.chars() {
-        match ch {
-            '\'' if !in_double_quote => {
-                in_single_quote = !in_single_quote;
-                current.push(ch);
-            }
-            '"' if !in_single_quote => {
-                in_double_quote = !in_double_quote;
-                current.push(ch);
-            }
-            ';' if !in_single_quote && !in_double_quote => {
-                let trimmed = current.trim().to_string();
-                if !trimmed.is_empty() {
-                    statements.push(trimmed);
+    let flush = |buf: &mut String, statements: &mut Vec<String>| {
+        let trimmed = buf.trim();
+        if !trimmed.is_empty() && !strip_comments(trimmed).trim().is_empty() {
+            statements.push(trimmed.to_string());
+        }
+        buf.clear();
+    };
+
+    while let Some(ch) = chars.next() {
+        match state {
+            ScanState::Normal => match ch {
+                '\'' => {
+                    current.push(ch);
+                    state = ScanState::SingleQuote;
                 }
-                current.clear();
-            }
-            _ => {
+                '"' => {
+                    current.push(ch);
+                    state = ScanState::DoubleQuote;
+                }
+                '-' if chars.peek() == Some(&'-') => {
+                    current.push(ch);
+                    current.push(chars.next().unwrap());
+                    state = ScanState::LineComment;
+                }
+                '/' if chars.peek() == Some(&'*') => {
+                    current.push(ch);
+                    current.push(chars.next().unwrap());
+                    state = ScanState::BlockComment;
+                }
+                ';' => flush(&mut current, &mut statements),
+                _ => current.push(ch),
+            },
+            ScanState::SingleQuote => {
                 current.push(ch);
+                if ch == '\'' {
+                    state = ScanState::Normal;
+                }
+            }
+            ScanState::DoubleQuote => {
+                current.push(ch);
+                if ch == '"' {
+                    state = ScanState::Normal;
+                }
+            }
+            ScanState::LineComment => {
+                current.push(ch);
+                if ch == '\n' {
+                    state = ScanState::Normal;
+                }
+            }
+            ScanState::BlockComment => {
+                current.push(ch);
+                if ch == '*' && chars.peek() == Some(&'/') {
+                    current.push(chars.next().unwrap());
+                    state = ScanState::Normal;
+                }
             }
         }
     }
 
-    let trimmed = current.trim().to_string();
-    if !trimmed.is_empty() {
-        statements.push(trimmed);
-    }
+    flush(&mut current, &mut statements);
 
     statements
 }
 
-/// Classifies a SQL statement as a query (returns rows), DML (returns row count), or DDL (returns OK).
+/// Classifies a SQL statement to choose the correct execution path:
+/// `Query` returns rows, `Dml` returns a row count, `Ddl` returns OK,
+/// and `Execute` (e.g. `EXECUTE SCRIPT`) may return either and must be
+/// resolved at runtime.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StatementType {
     Query,
     Dml,
     Ddl,
+    Execute,
 }
 
 impl StatementType {
-    /// Classify a SQL statement by its first keyword.
+    /// Classify a SQL statement by its first keyword, ignoring any leading
+    /// comments and whitespace. The original SQL is not modified — comments
+    /// are stripped only for the purpose of extracting the keyword.
     pub fn from_sql(sql: &str) -> Self {
-        let first_word = sql.split_whitespace().next().unwrap_or("").to_uppercase();
+        let stripped = strip_comments(sql);
+        let first_word = stripped
+            .split_whitespace()
+            .next()
+            .unwrap_or("")
+            .to_uppercase();
 
         match first_word.as_str() {
             "SELECT" | "WITH" | "DESCRIBE" | "EXPLAIN" | "SHOW" => StatementType::Query,
             "INSERT" | "UPDATE" | "DELETE" | "MERGE" => StatementType::Dml,
+            "EXECUTE" => StatementType::Execute,
             _ => StatementType::Ddl,
         }
     }
@@ -253,7 +310,6 @@ pub fn write_json(batches: &[RecordBatch]) -> anyhow::Result<()> {
 /// Execute the `sql` subcommand.
 pub async fn run(args: SqlArgs) -> anyhow::Result<()> {
     let sql_input = resolve_sql_input(&args)?;
-    let sql_input = strip_comments(&sql_input);
 
     let statements = split_statements(&sql_input);
     if statements.is_empty() {
@@ -335,6 +391,44 @@ pub async fn run(args: SqlArgs) -> anyhow::Result<()> {
                     break;
                 }
             },
+            StatementType::Execute => match conn.execute(stmt.as_str()).await {
+                Ok(result_set) => {
+                    if result_set.is_stream() {
+                        match result_set.fetch_all().await {
+                            Ok(batches) => {
+                                let row_count: usize = batches.iter().map(|b| b.num_rows()).sum();
+                                eprintln!(" {} rows", row_count);
+                                executed += 1;
+                                if !first_select {
+                                    println!();
+                                }
+                                first_select = false;
+                                match args.format {
+                                    OutputFormat::Csv => write_csv(&batches)?,
+                                    OutputFormat::Json => write_json(&batches)?,
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!();
+                                failed += 1;
+                                format_error(stmt_num, stmt, &e);
+                                exec_error = Some(e.into());
+                                break;
+                            }
+                        }
+                    } else {
+                        executed += 1;
+                        eprintln!(" OK");
+                    }
+                }
+                Err(e) => {
+                    eprintln!();
+                    failed += 1;
+                    format_error(stmt_num, stmt, &e);
+                    exec_error = Some(e.into());
+                    break;
+                }
+            },
         }
     }
 
@@ -350,16 +444,9 @@ pub async fn run(args: SqlArgs) -> anyhow::Result<()> {
 /// Resolve SQL input from positional argument or stdin.
 fn resolve_sql_input(args: &SqlArgs) -> anyhow::Result<String> {
     match &args.sql {
-        Some(sql) if sql == "-" => {
-            // Explicit stdin via "-"
-            read_stdin()
-        }
-        Some(sql) => {
-            // SQL provided as positional argument
-            Ok(sql.clone())
-        }
+        Some(sql) if sql == "-" => read_stdin(),
+        Some(sql) => Ok(sql.clone()),
         None => {
-            // No argument: check if stdin is piped
             let stdin = std::io::stdin();
             if stdin.is_terminal() {
                 anyhow::bail!("SQL argument is required")
@@ -472,6 +559,114 @@ mod tests {
         assert_eq!(result[1], "INSERT INTO t VALUES (1)");
     }
 
+    #[test]
+    fn split_preserves_block_comment_hint_prefix() {
+        let result = split_statements("/*snapshot execution*/ SELECT 1");
+        assert_eq!(result, vec!["/*snapshot execution*/ SELECT 1"]);
+    }
+
+    #[test]
+    fn split_preserves_leading_block_comment() {
+        let result = split_statements("/* hint */ SELECT 1");
+        assert_eq!(result, vec!["/* hint */ SELECT 1"]);
+    }
+
+    #[test]
+    fn split_preserves_leading_line_comment() {
+        let result = split_statements("-- a leading comment\nSELECT 1");
+        assert_eq!(result, vec!["-- a leading comment\nSELECT 1"]);
+    }
+
+    #[test]
+    fn split_preserves_trailing_line_comment_per_statement() {
+        let result = split_statements("SELECT 1 -- trailing\n; SELECT 2");
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0], "SELECT 1 -- trailing");
+        assert_eq!(result[1], "SELECT 2");
+    }
+
+    #[test]
+    fn split_preserves_line_comment_with_semicolons() {
+        let result = split_statements("SELECT 1 -- a; b; c\n; SELECT 2");
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0], "SELECT 1 -- a; b; c");
+        assert_eq!(result[1], "SELECT 2");
+    }
+
+    #[test]
+    fn split_preserves_block_comment_with_semicolons() {
+        let result = split_statements("SELECT /* a; b; c */ 1; SELECT 2");
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0], "SELECT /* a; b; c */ 1");
+        assert_eq!(result[1], "SELECT 2");
+    }
+
+    #[test]
+    fn split_preserves_multiline_block_comment() {
+        let result = split_statements("/* multi\nline\ncomment */ SELECT 1");
+        assert_eq!(result, vec!["/* multi\nline\ncomment */ SELECT 1"]);
+    }
+
+    #[test]
+    fn split_preserves_unterminated_block_comment_verbatim() {
+        let result = split_statements("SELECT 1 /* unterminated");
+        assert_eq!(result, vec!["SELECT 1 /* unterminated"]);
+    }
+
+    #[test]
+    fn split_comment_only_input_yields_no_statements() {
+        let result = split_statements("-- just a comment\n/* another */\n");
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn split_does_not_start_comment_inside_single_quote() {
+        let result = split_statements("SELECT '-- not a comment' AS val; SELECT 2");
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0], "SELECT '-- not a comment' AS val");
+        assert_eq!(result[1], "SELECT 2");
+    }
+
+    #[test]
+    fn split_does_not_start_block_comment_inside_single_quote() {
+        let result = split_statements("SELECT '/* keep */;' AS val; SELECT 2");
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0], "SELECT '/* keep */;' AS val");
+        assert_eq!(result[1], "SELECT 2");
+    }
+
+    #[test]
+    fn split_does_not_start_comment_inside_double_quote() {
+        let result = split_statements("SELECT \"x-- y;\" FROM t; SELECT 2");
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0], "SELECT \"x-- y;\" FROM t");
+        assert_eq!(result[1], "SELECT 2");
+    }
+
+    #[test]
+    fn split_minus_minus_only_when_two_dashes() {
+        let result = split_statements("SELECT 1 - 2; SELECT 3");
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0], "SELECT 1 - 2");
+        assert_eq!(result[1], "SELECT 3");
+    }
+
+    #[test]
+    fn split_slash_star_only_when_followed_by_star() {
+        let result = split_statements("SELECT 4 / 2; SELECT 3");
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0], "SELECT 4 / 2");
+        assert_eq!(result[1], "SELECT 3");
+    }
+
+    #[test]
+    fn split_empty_block_comment() {
+        let result = split_statements("SELECT /**/ 1; SELECT 2");
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0], "SELECT /**/ 1");
+        assert_eq!(result[1], "SELECT 2");
+    }
+
     // --- strip_comments tests ---
 
     #[test]
@@ -490,22 +685,17 @@ mod tests {
     }
 
     #[test]
-    fn strip_then_split_semicolon_in_line_comment() {
-        let result = strip_comments("SELECT 1 -- a; b; c\n");
-        let statements = split_statements(&result);
-        assert_eq!(statements.len(), 1);
-        assert_eq!(statements[0], "SELECT 1");
+    fn split_preserves_line_comment_with_semicolons_simple() {
+        let result = split_statements("SELECT 1 -- a; b; c\n");
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0], "SELECT 1 -- a; b; c");
     }
 
     #[test]
-    fn strip_then_split_semicolon_in_block_comment() {
-        let result = strip_comments("SELECT /* a; b */ 1");
-        let statements = split_statements(&result);
-        assert_eq!(statements.len(), 1);
-        assert_eq!(
-            statements[0].split_whitespace().collect::<Vec<_>>(),
-            vec!["SELECT", "1"]
-        );
+    fn split_preserves_block_comment_with_semicolons_simple() {
+        let result = split_statements("SELECT /* a; b */ 1");
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0], "SELECT /* a; b */ 1");
     }
 
     #[test]
@@ -660,6 +850,78 @@ mod tests {
         assert_eq!(
             StatementType::from_sql("MERGE INTO t USING s ON t.id = s.id"),
             StatementType::Dml
+        );
+    }
+
+    #[test]
+    fn statement_type_execute_script() {
+        assert_eq!(
+            StatementType::from_sql("EXECUTE SCRIPT \"S\".\"HELLO\"()"),
+            StatementType::Execute
+        );
+    }
+
+    #[test]
+    fn statement_type_execute_lowercase() {
+        assert_eq!(
+            StatementType::from_sql("execute script my_script()"),
+            StatementType::Execute
+        );
+    }
+
+    #[test]
+    fn classify_with_leading_line_comment() {
+        assert_eq!(
+            StatementType::from_sql("-- comment\nSELECT 1"),
+            StatementType::Query
+        );
+    }
+
+    #[test]
+    fn classify_with_leading_block_comment() {
+        assert_eq!(
+            StatementType::from_sql("/* hint */ SELECT 1"),
+            StatementType::Query
+        );
+    }
+
+    #[test]
+    fn statement_type_block_comment_prefix_select() {
+        assert_eq!(
+            StatementType::from_sql("/*snapshot execution*/ SELECT 1"),
+            StatementType::Query
+        );
+    }
+
+    #[test]
+    fn statement_type_line_comment_prefix_select() {
+        assert_eq!(
+            StatementType::from_sql("-- leading comment\nSELECT 1"),
+            StatementType::Query
+        );
+    }
+
+    #[test]
+    fn statement_type_block_comment_prefix_execute() {
+        assert_eq!(
+            StatementType::from_sql("/* hint */ EXECUTE SCRIPT s()"),
+            StatementType::Execute
+        );
+    }
+
+    #[test]
+    fn statement_type_block_comment_prefix_insert() {
+        assert_eq!(
+            StatementType::from_sql("/* hint */ INSERT INTO t VALUES (1)"),
+            StatementType::Dml
+        );
+    }
+
+    #[test]
+    fn statement_type_comment_only_is_ddl_fallback() {
+        assert_eq!(
+            StatementType::from_sql("-- only comment\n"),
+            StatementType::Ddl
         );
     }
 

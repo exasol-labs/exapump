@@ -1,12 +1,22 @@
 # Changelog
 
-## Unreleased
+## 0.10.0
 
 - `profile add` prompts for the password via a hidden TTY prompt when `--password` is omitted in an interactive shell; non-TTY contexts still fail with a hint to use `profile init` or pass `--password`
 - New `profile init` subcommand: guided wizard for cold-start profile creation with optional pre-fill flags (`--name` positional, `--host`, `--port`, `--user`, `--schema`, `--certificate-fingerprint`, `--default`, `--no-bucketfs`); password never accepted on the command line
 - New `profile edit` subcommand: interactive editor with current values shown as defaults; password change gated behind a confirm prompt; BucketFS section can be skipped with `--no-bucketfs`
 - `profile remove` now asks for confirmation in a TTY before deleting; pass `-y/--yes` to skip (required for scripted use, refuses without it in non-TTY contexts)
-- Saved config files are now written with `0600` permissions on unix to protect credentials at rest
+- Saved config files now warn on unix when group or other users can access them; permissions are left under user control
+
+## 0.9.2
+
+- Bump exarrow-rs to 0.12.3: fixes `?` placeholder collision inside SQL literals/identifiers/comments (#17), `WHERE col IN (...)` returning zero rows over native transport (#18), configurable statement timeout (0.12.1), and security patches for rustls-webpki CVE and rand unsoundness (0.12.2)
+
+## 0.9.1
+
+- Fix SQL classification for statements prefixed with `--` or `/* */` comments (issue #14): comments and hints now reach Exasol verbatim; stripping is done internally for statement-type classification only
+- Add `EXECUTE SCRIPT` support (issue #16): statements are classified as `Execute` and dispatched via `conn.execute`, branching on `result_set.row_count()` to handle both result-set and no-result-set scripts correctly
+- Replace `strip_comments` pre-pass in `sql` and `interactive` with a comment-aware four-state scanner in `split_statements`
 
 ## 0.9.0
 
