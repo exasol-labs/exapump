@@ -1,6 +1,6 @@
 [package]
 name = "exapump"
-version = "0.9.2"
+version = "0.10.0"
 edition = "2021"
 description = "The simplest path from file to Exasol table — a single-binary CLI for CSV and Parquet ingest."
 license = "MIT"
@@ -28,6 +28,8 @@ serde = { version = "1", features = ["derive"] }
 dirs = "6"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+rpassword = "7"
+inquire = { version = "0.7", default-features = false, features = ["crossterm"] }
 
 [dev-dependencies]
 assert_cmd = "2"

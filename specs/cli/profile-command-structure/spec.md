@@ -1,6 +1,6 @@
 # Feature: Profile Command Structure
 
-The `profile` subcommand manages connection profiles stored in `~/.exapump/config.toml`. It provides subcommands to list, show, add, and remove profiles.
+The `profile` subcommand manages connection profiles stored in `~/.exapump/config.toml`. It provides subcommands to list, show, add, remove, init (guided wizard), and edit (interactive editor) profiles.
 
 ## Background
 
@@ -139,3 +139,103 @@ The `profile` subcommand is available as `exapump profile`. It does not require 
 * *WHEN* the user runs `exapump profile add staging --host exa.example.com --user u --password p --certificate-fingerprint deadbeefcafebabe`
 * *THEN* the `[staging]` section MUST be written with `certificate_fingerprint = "deadbeefcafebabe"`
 * *AND* stdout MUST confirm the profile was added
+
+### Scenario: Profile add prompts for password on TTY when --password omitted
+
+* *GIVEN* exapump is installed
+* *AND* the user runs `exapump profile add staging --host h --user u` without `--password` in an interactive terminal
+* *WHEN* the command executes
+* *THEN* exapump MUST prompt for the password via a hidden TTY input (no echo)
+* *AND* the password value MUST NOT appear in the process command line, shell history, or stdout
+* *AND* if the entered password is empty the command MUST exit with a non-zero code and indicate the password cannot be empty
+
+### Scenario: Profile add refuses missing password in non-TTY context
+
+* *GIVEN* exapump is installed
+* *AND* the user runs `exapump profile add staging --host h --user u` without `--password` and without an interactive terminal (e.g. piped stdin, CI)
+* *WHEN* the command executes
+* *THEN* the CLI MUST exit with a non-zero code
+* *AND* stderr MUST indicate `--password` is required
+* *AND* stderr MUST hint at the `profile init` wizard as the interactive alternative
+
+### Scenario: Profile init runs the guided wizard
+
+* *GIVEN* exapump is installed and stdin is an interactive terminal
+* *WHEN* the user runs `exapump profile init` with no other arguments
+* *THEN* exapump MUST prompt sequentially for: profile name, host, port (defaulting to 8563), user, password (hidden), password confirmation (hidden), schema (optional), TLS enable, server certificate validation, default-profile selection, and an optional BucketFS section
+* *AND* on success exapump MUST write the new profile to the config and print a confirmation line
+* *AND* the password MUST NOT be accepted as a command-line flag on the `init` subcommand
+
+### Scenario: Profile init accepts pre-fill flags
+
+* *GIVEN* exapump is installed and stdin is an interactive terminal
+* *WHEN* the user runs `exapump profile init prod --host h --port 8563 --user u --schema s --default --no-bucketfs`
+* *THEN* exapump MUST skip the prompts for the pre-filled fields
+* *AND* exapump MUST still prompt for the password and password confirmation via hidden TTY input
+* *AND* exapump MUST NOT prompt for BucketFS settings
+
+### Scenario: Profile init refuses without a TTY
+
+* *GIVEN* exapump is installed
+* *AND* stdin is not an interactive terminal
+* *WHEN* the user runs `exapump profile init`
+* *THEN* the CLI MUST exit with a non-zero code
+* *AND* stderr MUST indicate an interactive terminal is required
+* *AND* stderr MUST suggest `profile add` with explicit flags for scripted setups
+
+### Scenario: Profile init rejects an existing profile name
+
+* *GIVEN* a config file contains a profile named `prod`
+* *AND* stdin is an interactive terminal
+* *WHEN* the user runs `exapump profile init prod`
+* *THEN* the CLI MUST exit with a non-zero code
+* *AND* stderr MUST indicate the profile already exists and suggest `profile remove` first
+
+### Scenario: Profile edit updates an existing profile interactively
+
+* *GIVEN* a config file contains a profile named `prod`
+* *AND* stdin is an interactive terminal
+* *WHEN* the user runs `exapump profile edit prod`
+* *THEN* exapump MUST prompt for each field with the current value shown as the default (pressing Enter keeps it)
+* *AND* exapump MUST gate the password rotation behind a "Change password?" confirmation prompt
+* *AND* if the user declines the password change the saved password MUST remain unchanged
+* *AND* if the user accepts the password change exapump MUST prompt for the new password and confirmation via hidden TTY input
+
+### Scenario: Profile edit refuses without a TTY
+
+* *GIVEN* exapump is installed
+* *AND* stdin is not an interactive terminal
+* *WHEN* the user runs `exapump profile edit prod`
+* *THEN* the CLI MUST exit with a non-zero code
+* *AND* stderr MUST indicate an interactive terminal is required
+
+### Scenario: Profile edit on missing profile
+
+* *GIVEN* a config file exists but does not contain a profile named `ghost`
+* *WHEN* the user runs `exapump profile edit ghost`
+* *THEN* the CLI MUST exit with a non-zero code
+* *AND* stderr MUST indicate the profile was not found or the command requires an interactive terminal
+
+### Scenario: Profile remove prompts for confirmation on TTY
+
+* *GIVEN* a config file contains a profile named `prod`
+* *AND* stdin is an interactive terminal
+* *WHEN* the user runs `exapump profile remove prod` without `--yes`
+* *THEN* exapump MUST prompt the user to confirm the removal
+* *AND* if the user declines the profile MUST remain in the config file
+
+### Scenario: Profile remove --yes skips confirmation
+
+* *GIVEN* a config file contains a profile named `prod`
+* *WHEN* the user runs `exapump profile remove prod --yes` (or `-y`)
+* *THEN* exapump MUST remove the profile without prompting
+* *AND* stdout MUST confirm the profile was removed
+
+### Scenario: Profile remove refuses to delete without --yes in non-TTY context
+
+* *GIVEN* a config file contains a profile named `prod`
+* *AND* stdin is not an interactive terminal
+* *WHEN* the user runs `exapump profile remove prod` without `--yes`
+* *THEN* the CLI MUST exit with a non-zero code
+* *AND* stderr MUST indicate `--yes` is required in non-interactive contexts
+* *AND* the profile MUST remain in the config file

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.10.0
+
+- `profile add` prompts for the password via a hidden TTY prompt when `--password` is omitted in an interactive shell; non-TTY contexts still fail with a hint to use `profile init` or pass `--password`
+- New `profile init` subcommand: guided wizard for cold-start profile creation with optional pre-fill flags (`--name` positional, `--host`, `--port`, `--user`, `--schema`, `--certificate-fingerprint`, `--default`, `--no-bucketfs`); password never accepted on the command line
+- New `profile edit` subcommand: interactive editor with current values shown as defaults; password change gated behind a confirm prompt; BucketFS section can be skipped with `--no-bucketfs`
+- `profile remove` now asks for confirmation in a TTY before deleting; pass `-y/--yes` to skip (required for scripted use, refuses without it in non-TTY contexts)
+- Saved config files now warn on unix when group or other users can access them; permissions are left under user control
+
 ## 0.9.2
 
 - Bump exarrow-rs to 0.12.3: fixes `?` placeholder collision inside SQL literals/identifiers/comments (#17), `WHERE col IN (...)` returning zero rows over native transport (#18), configurable statement timeout (0.12.1), and security patches for rustls-webpki CVE and rand unsoundness (0.12.2)

@@ -214,7 +214,7 @@ password = "exasol"
 
     fixtures::exapump()
         .env("EXAPUMP_CONFIG", config_path.to_str().unwrap())
-        .args(["profile", "remove", "default"])
+        .args(["profile", "remove", "default", "--yes"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Profile 'default' removed"));
@@ -222,6 +222,69 @@ password = "exasol"
     // Verify the profile was actually removed from the file
     let content = std::fs::read_to_string(&config_path).unwrap();
     assert!(!content.contains("[default]"));
+}
+
+#[test]
+fn profile_remove_without_yes_refuses_non_tty() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = write_config(
+        dir.path(),
+        r#"
+[default]
+host = "localhost"
+port = 8563
+user = "sys"
+password = "exasol"
+"#,
+    );
+
+    fixtures::exapump()
+        .env("EXAPUMP_CONFIG", config_path.to_str().unwrap())
+        .args(["profile", "remove", "default"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("--yes"));
+
+    let content = std::fs::read_to_string(&config_path).unwrap();
+    assert!(content.contains("[default]"));
+}
+
+#[test]
+fn profile_edit_non_tty_fails() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = write_config(
+        dir.path(),
+        r#"
+[default]
+host = "localhost"
+port = 8563
+user = "sys"
+password = "exasol"
+"#,
+    );
+
+    fixtures::exapump()
+        .env("EXAPUMP_CONFIG", config_path.to_str().unwrap())
+        .args(["profile", "edit", "default"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("interactive terminal"));
+}
+
+#[test]
+fn profile_edit_missing_profile() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join("nonexistent_config.toml");
+
+    fixtures::exapump()
+        .env("EXAPUMP_CONFIG", config_path.to_str().unwrap())
+        .args(["profile", "edit", "ghost"])
+        .assert()
+        .failure()
+        .stderr(
+            predicate::str::contains("interactive terminal")
+                .or(predicate::str::contains("not found")),
+        );
 }
 
 #[test]
@@ -250,6 +313,91 @@ fn profile_add_missing_required_fields() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("--host").or(predicate::str::contains("required")));
+}
+
+#[test]
+fn profile_add_missing_password_non_tty_fails_with_init_hint() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join(".exapump").join("config.toml");
+    std::fs::create_dir_all(config_path.parent().unwrap()).unwrap();
+
+    // assert_cmd runs the binary without a TTY, so the prompt fallback
+    // must refuse and surface the `profile init` hint.
+    fixtures::exapump()
+        .env("EXAPUMP_CONFIG", config_path.to_str().unwrap())
+        .args([
+            "profile",
+            "add",
+            "prod",
+            "--host",
+            "db.example.com",
+            "--user",
+            "analyst",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("profile init"));
+}
+
+#[test]
+fn profile_init_non_tty_fails() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join(".exapump").join("config.toml");
+    std::fs::create_dir_all(config_path.parent().unwrap()).unwrap();
+
+    fixtures::exapump()
+        .env("EXAPUMP_CONFIG", config_path.to_str().unwrap())
+        .args(["profile", "init"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("interactive terminal"));
+}
+
+#[cfg(unix)]
+#[test]
+fn saved_config_warns_on_broad_perms_without_changing_mode() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = write_config(
+        dir.path(),
+        r#"
+[default]
+host = "localhost"
+port = 8563
+user = "sys"
+password = "exasol"
+"#,
+    );
+    std::fs::set_permissions(&config_path, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+    fixtures::exapump()
+        .env("EXAPUMP_CONFIG", config_path.to_str().unwrap())
+        .args([
+            "profile",
+            "add",
+            "prod",
+            "--host",
+            "db.example.com",
+            "--user",
+            "analyst",
+            "--password",
+            "s3cret",
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Warning: config file"))
+        .stderr(predicate::str::contains("chmod 600"));
+
+    let mode = std::fs::metadata(&config_path)
+        .unwrap()
+        .permissions()
+        .mode()
+        & 0o777;
+    assert_eq!(
+        mode, 0o644,
+        "config file permissions should remain user-controlled, got {:o}",
+        mode
+    );
 }
 
 #[test]
