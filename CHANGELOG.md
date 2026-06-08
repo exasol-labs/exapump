@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.3
+
+- Dependency: `exarrow-rs` upgraded 0.12.3 → 0.12.6; `arrow`, `arrow-csv`, `arrow-json`, and `parquet` upgraded 57 → 58 (unifies Arrow sub-crate versions, formally acknowledges GHSA-2f9f-gq7v-9h6m thrift CVE in deny.toml, adds advisory CI gate)
+
 ## 0.9.2
 
 - Bump exarrow-rs to 0.12.3: fixes `?` placeholder collision inside SQL literals/identifiers/comments (#17), `WHERE col IN (...)` returning zero rows over native transport (#18), configurable statement timeout (0.12.1), and security patches for rustls-webpki CVE and rand unsoundness (0.12.2)
