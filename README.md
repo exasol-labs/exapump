@@ -36,6 +36,12 @@ Windows users: grab the `.exe` from the [latest release](https://github.com/exas
 exapump profile add default
 ```
 
+Or, for non-Docker hosts, run the guided wizard (password prompted hidden — never on the command line or in shell history):
+
+```bash
+exapump profile init
+```
+
 **3. Run a command**
 
 ```bash

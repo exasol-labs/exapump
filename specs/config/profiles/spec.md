@@ -344,3 +344,13 @@ bfs_validate_certificate = false
 * *GIVEN* a profile named `nopin` with no `certificate_fingerprint` field
 * *WHEN* exapump generates the DSN for the profile
 * *THEN* the DSN MUST NOT contain a `certificate_fingerprint` parameter
+
+### Scenario: Broad saved config file permissions warn on unix
+
+* *GIVEN* exapump is running on a unix-like operating system
+* *AND* `~/.exapump/config.toml` has group or other permission bits set
+* *WHEN* exapump writes (or rewrites) the config from any subcommand that mutates profiles (`add`, `init`, `edit`, `remove`)
+* *THEN* stderr MUST warn that the config file permissions can expose credentials
+* *AND* stderr SHOULD suggest `chmod 600`
+* *AND* exapump MUST NOT change the file mode automatically
+* *AND* on non-unix platforms exapump MUST NOT fail because of permission handling
