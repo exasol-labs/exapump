@@ -122,7 +122,7 @@ exapump profile add production \
 # Password for profile 'production': (input hidden)
 ```
 
-The saved config file is written with `0600` permissions on unix so only your user can read it.
+On unix, exapump warns when the saved config file is readable or writable by group or other users because credentials are stored there. File permissions remain under your control; use `chmod 600 ~/.exapump/config.toml` if you want owner-only access.
 
 In non-interactive contexts (CI, pipes), `profile add` without `--password` fails with a clear error. Use `profile init` for the guided wizard or pass `--password` explicitly.
 

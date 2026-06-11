@@ -169,23 +169,29 @@ pub fn save_config(config: &Config) -> anyhow::Result<()> {
     }
     let content = toml::to_string(config)?;
     std::fs::write(&path, content)?;
-    restrict_config_perms(&path)?;
+    warn_if_config_perms_are_broad(&path);
     Ok(())
 }
 
 #[cfg(unix)]
-fn restrict_config_perms(path: &std::path::Path) -> anyhow::Result<()> {
+fn warn_if_config_perms_are_broad(path: &std::path::Path) {
     use std::os::unix::fs::PermissionsExt;
-    let mut perms = std::fs::metadata(path)?.permissions();
-    perms.set_mode(0o600);
-    std::fs::set_permissions(path, perms)?;
-    Ok(())
+    let Ok(metadata) = std::fs::metadata(path) else {
+        return;
+    };
+    let mode = metadata.permissions().mode() & 0o777;
+    if mode & 0o077 != 0 {
+        eprintln!(
+            "Warning: config file {} has permissions {:03o}; credentials may be readable by other users. Consider running `chmod 600 {}`.",
+            path.display(),
+            mode,
+            path.display()
+        );
+    }
 }
 
 #[cfg(not(unix))]
-fn restrict_config_perms(_path: &std::path::Path) -> anyhow::Result<()> {
-    Ok(())
-}
+fn warn_if_config_perms_are_broad(_path: &std::path::Path) {}
 
 pub fn validate_profile_name(name: &str) -> anyhow::Result<()> {
     let valid = !name.is_empty()

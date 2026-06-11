@@ -355,11 +355,17 @@ fn profile_init_non_tty_fails() {
 
 #[cfg(unix)]
 #[test]
-fn saved_config_has_user_only_perms() {
+fn broad_config_perms_emit_warning() {
     use std::os::unix::fs::PermissionsExt;
     let dir = tempfile::tempdir().unwrap();
     let config_path = dir.path().join(".exapump").join("config.toml");
     std::fs::create_dir_all(config_path.parent().unwrap()).unwrap();
+
+    // Pre-create the file with group-readable permissions so the warning triggers.
+    std::fs::write(&config_path, "").unwrap();
+    let mut perms = std::fs::metadata(&config_path).unwrap().permissions();
+    perms.set_mode(0o644);
+    std::fs::set_permissions(&config_path, perms).unwrap();
 
     fixtures::exapump()
         .env("EXAPUMP_CONFIG", config_path.to_str().unwrap())
@@ -375,18 +381,16 @@ fn saved_config_has_user_only_perms() {
             "s3cret",
         ])
         .assert()
-        .success();
+        .success()
+        .stderr(predicates::str::contains("chmod 600"));
 
+    // Permissions must NOT have been changed automatically.
     let mode = std::fs::metadata(&config_path)
         .unwrap()
         .permissions()
         .mode()
         & 0o777;
-    assert_eq!(
-        mode, 0o600,
-        "config file should be chmod 600, got {:o}",
-        mode
-    );
+    assert_ne!(mode, 0o600, "exapump must not auto-chmod the config file");
 }
 
 #[test]
