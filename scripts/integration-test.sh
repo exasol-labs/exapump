@@ -10,7 +10,10 @@ export EXASOL_PASSWORD="${EXASOL_PASSWORD:-exasol}"
 export REQUIRE_EXASOL="${REQUIRE_EXASOL:-1}"
 
 echo "=== Waiting for Exasol ==="
-"$SCRIPT_DIR/wait-for-exasol.sh" exasol-test 1500
+cargo run --bin exapump -- wait \
+    --container exasol-test \
+    --timeout-secs 1500 \
+    --dsn "exasol://sys:exasol@localhost:8563?tls=true&validateservercertificate=0"
 
 echo "=== Running all tests ==="
 cargo test --verbose
