@@ -84,12 +84,25 @@ pub fn split_statements(input: &str) -> Vec<String> {
         DoubleQuote,
         LineComment,
         BlockComment,
+        ScriptBody,
+    }
+
+    // Tracks progress through the `CREATE … SCRIPT … AS` header in Normal state.
+    #[derive(Clone, Copy, PartialEq)]
+    enum HeaderKeyword {
+        None,
+        SawCreate,
+        SawScript,
     }
 
     let mut statements = Vec::new();
     let mut current = String::new();
     let mut state = ScanState::Normal;
     let mut chars = input.chars().peekable();
+
+    let mut header = HeaderKeyword::None;
+    let mut word = String::new();
+    let mut line_start = true;
 
     let flush = |buf: &mut String, statements: &mut Vec<String>| {
         let trimmed = buf.trim();
@@ -99,30 +112,101 @@ pub fn split_statements(input: &str) -> Vec<String> {
         buf.clear();
     };
 
+    // Advance the header tracker with a completed word; returns true when the
+    // word is the `AS` that completes a `CREATE … SCRIPT … AS` header.
+    let advance_header = |header: &mut HeaderKeyword, word: &str| -> bool {
+        let upper = word.to_uppercase();
+        match *header {
+            HeaderKeyword::None => {
+                if upper == "CREATE" {
+                    *header = HeaderKeyword::SawCreate;
+                }
+            }
+            HeaderKeyword::SawCreate => {
+                if upper == "SCRIPT" {
+                    *header = HeaderKeyword::SawScript;
+                }
+            }
+            HeaderKeyword::SawScript => {
+                if upper == "AS" {
+                    return true;
+                }
+            }
+        }
+        false
+    };
+
     while let Some(ch) = chars.next() {
         match state {
-            ScanState::Normal => match ch {
-                '\'' => {
+            ScanState::Normal => {
+                if ch.is_alphanumeric() || ch == '_' {
+                    word.push(ch);
                     current.push(ch);
-                    state = ScanState::SingleQuote;
+                    continue;
                 }
-                '"' => {
+
+                // Word boundary: finalize the accumulated token.
+                let enter_script = if word.is_empty() {
+                    false
+                } else {
+                    let entered = advance_header(&mut header, &word);
+                    word.clear();
+                    entered
+                };
+
+                if enter_script {
+                    header = HeaderKeyword::None;
+                    state = ScanState::ScriptBody;
                     current.push(ch);
-                    state = ScanState::DoubleQuote;
+                    line_start = ch == '\n' || ch == ' ' || ch == '\t';
+                    continue;
                 }
-                '-' if chars.peek() == Some(&'-') => {
+
+                match ch {
+                    '\'' => {
+                        current.push(ch);
+                        state = ScanState::SingleQuote;
+                    }
+                    '"' => {
+                        current.push(ch);
+                        state = ScanState::DoubleQuote;
+                    }
+                    '-' if chars.peek() == Some(&'-') => {
+                        current.push(ch);
+                        current.push(chars.next().unwrap());
+                        state = ScanState::LineComment;
+                    }
+                    '/' if chars.peek() == Some(&'*') => {
+                        current.push(ch);
+                        current.push(chars.next().unwrap());
+                        state = ScanState::BlockComment;
+                    }
+                    ';' => {
+                        header = HeaderKeyword::None;
+                        flush(&mut current, &mut statements);
+                    }
+                    _ => current.push(ch),
+                }
+            }
+            ScanState::ScriptBody => {
+                if line_start && ch == '/' && matches!(chars.peek(), Some('\n') | None) {
+                    // Lone `/` line terminator: drop the trailing newline that
+                    // began this line, then flush the body (the `/` is not pushed).
+                    if current.ends_with('\n') {
+                        current.pop();
+                    }
+                    flush(&mut current, &mut statements);
+                    header = HeaderKeyword::None;
+                    state = ScanState::Normal;
+                } else {
                     current.push(ch);
-                    current.push(chars.next().unwrap());
-                    state = ScanState::LineComment;
+                    if ch == '\n' {
+                        line_start = true;
+                    } else if ch != ' ' && ch != '\t' {
+                        line_start = false;
+                    }
                 }
-                '/' if chars.peek() == Some(&'*') => {
-                    current.push(ch);
-                    current.push(chars.next().unwrap());
-                    state = ScanState::BlockComment;
-                }
-                ';' => flush(&mut current, &mut statements),
-                _ => current.push(ch),
-            },
+            }
             ScanState::SingleQuote => {
                 current.push(ch);
                 if ch == '\'' {
@@ -665,6 +749,52 @@ mod tests {
         assert_eq!(result.len(), 2);
         assert_eq!(result[0], "SELECT /**/ 1");
         assert_eq!(result[1], "SELECT 2");
+    }
+
+    // --- split_statements ScriptBody tests ---
+
+    #[test]
+    fn split_script_body_keeps_internal_semicolons() {
+        let input = "CREATE OR REPLACE LUA SCRIPT TEST.HELLO() RETURNS TABLE AS\n  local x = 1;\n  return query [[ SELECT 1 ]]\n/\n";
+        let result = split_statements(input);
+        assert_eq!(result.len(), 1);
+        assert!(result[0].contains("local x = 1;"));
+    }
+
+    #[test]
+    fn split_script_body_excludes_lone_slash() {
+        let input = "CREATE OR REPLACE LUA SCRIPT TEST.HELLO() RETURNS TABLE AS\n  local x = 1;\n  return query [[ SELECT 1 ]]\n/\n";
+        let result = split_statements(input);
+        assert_eq!(result.len(), 1);
+        assert!(!result[0].contains("/\n"));
+        assert!(!result[0].contains("\n/"));
+        assert!(result[0].ends_with("  return query [[ SELECT 1 ]]"));
+    }
+
+    #[test]
+    fn split_script_block_mixed_with_statements() {
+        let input = "SELECT 1;\nCREATE LUA SCRIPT S.HELLO() AS\n  return 0;\n/\nSELECT 2;";
+        let result = split_statements(input);
+        assert_eq!(result.len(), 3);
+        assert_eq!(result[0], "SELECT 1");
+        assert_eq!(result[1], "CREATE LUA SCRIPT S.HELLO() AS\n  return 0;");
+        assert_eq!(result[2], "SELECT 2");
+    }
+
+    #[test]
+    fn split_python3_adapter_script_header() {
+        let input =
+            "CREATE OR REPLACE PYTHON3 ADAPTER SCRIPT schema.name() AS\n  x = 1;\n  y = 2;\n/\n";
+        let result = split_statements(input);
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn split_create_script_without_as_splits_normally() {
+        let result = split_statements("CREATE SCRIPT foo; SELECT 1");
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0], "CREATE SCRIPT foo");
+        assert_eq!(result[1], "SELECT 1");
     }
 
     // --- strip_comments tests ---

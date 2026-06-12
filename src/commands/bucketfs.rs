@@ -113,14 +113,15 @@ impl BucketFsClient {
             anyhow::bail!("Source file not found: {source}");
         }
 
-        let dest = if destination.ends_with('/') {
+        let stripped_dest = strip_bfs_uri(destination);
+        let dest = if stripped_dest.ends_with('/') {
             let filename = source_path
                 .file_name()
                 .ok_or_else(|| anyhow::anyhow!("Cannot determine filename from source: {source}"))?
                 .to_string_lossy();
-            format!("{destination}{filename}")
+            format!("{stripped_dest}{filename}")
         } else {
-            destination.to_string()
+            stripped_dest.to_string()
         };
 
         let url = format!("{}/{}/{dest}", self.base_url, self.bucket);
@@ -150,6 +151,7 @@ impl BucketFsClient {
     }
 
     pub async fn download(&self, source: &str, destination: &str) -> anyhow::Result<()> {
+        let source = strip_bfs_uri(source);
         let url = format!("{}/{}/{source}", self.base_url, self.bucket);
 
         let mut request = self.client.get(&url);
@@ -302,5 +304,45 @@ fn connect_error(url: &str, err: reqwest::Error) -> anyhow::Error {
         anyhow::anyhow!("BucketFS is not reachable at {}", extract_host_port(url))
     } else {
         anyhow::anyhow!("{err}")
+    }
+}
+
+/// Strips the `bfs://` scheme and bucket segment from `path`.
+/// If `path` starts with `bfs://`, skips the scheme, skips the bucket
+/// segment (up to and including the first `/`), and returns the remainder.
+/// Otherwise returns `path` unchanged.
+pub fn strip_bfs_uri(path: &str) -> &str {
+    let after_scheme = match path.strip_prefix("bfs://") {
+        Some(rest) => rest,
+        None => return path,
+    };
+    match after_scheme.find('/') {
+        Some(slash_pos) => &after_scheme[slash_pos + 1..],
+        None => after_scheme,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::strip_bfs_uri;
+
+    #[test]
+    fn strips_scheme_and_bucket() {
+        assert_eq!(strip_bfs_uri("bfs://default/path"), "path");
+    }
+
+    #[test]
+    fn strips_scheme_and_bucket_nested_path() {
+        assert_eq!(strip_bfs_uri("bfs://default/a/b"), "a/b");
+    }
+
+    #[test]
+    fn plain_path_unchanged() {
+        assert_eq!(strip_bfs_uri("path"), "path");
+    }
+
+    #[test]
+    fn empty_remainder_after_bucket() {
+        assert_eq!(strip_bfs_uri("bfs://default/"), "");
     }
 }

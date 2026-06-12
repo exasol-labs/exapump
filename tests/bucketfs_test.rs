@@ -259,3 +259,102 @@ fn download_file_not_found() {
             predicate::str::contains("not found").or(predicate::str::contains("File not found")),
         );
 }
+
+#[test]
+fn upload_accepts_bfs_uri_destination() {
+    fixtures::require_bucketfs!();
+    let write_pw = fixtures::bfs_write_password();
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = write_bfs_config(dir.path(), &write_pw);
+    let prefix = unique_prefix();
+
+    let upload_content = "bfs_uri upload test content\n";
+    let src_file = dir.path().join("bfs_uri_upload.txt");
+    std::fs::write(&src_file, upload_content).unwrap();
+
+    let plain_path = format!("{prefix}bfs_uri_upload.txt");
+    let bfs_uri_dest = format!("bfs://default/{plain_path}");
+
+    // Upload using a bfs:// URI as destination
+    bfs_cmd(&config_path)
+        .args([
+            "bucketfs",
+            "cp",
+            src_file.to_str().unwrap(),
+            &bfs_uri_dest,
+            "--profile",
+            "bfs",
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Uploaded"));
+
+    // Verify file is downloadable by its plain path
+    let dst_file = dir.path().join("bfs_uri_upload_dl.txt");
+    bfs_cmd(&config_path)
+        .args([
+            "bucketfs",
+            "cp",
+            &plain_path,
+            dst_file.to_str().unwrap(),
+            "--profile",
+            "bfs",
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Downloaded"));
+
+    let downloaded = std::fs::read_to_string(&dst_file).unwrap();
+    assert_eq!(downloaded, upload_content);
+
+    cleanup_path(&config_path, &plain_path);
+}
+
+#[test]
+fn download_accepts_bfs_uri_source() {
+    fixtures::require_bucketfs!();
+    let write_pw = fixtures::bfs_write_password();
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = write_bfs_config(dir.path(), &write_pw);
+    let prefix = unique_prefix();
+
+    let upload_content = "bfs_uri download test content\n";
+    let src_file = dir.path().join("bfs_uri_download.txt");
+    std::fs::write(&src_file, upload_content).unwrap();
+
+    let plain_path = format!("{prefix}bfs_uri_download.txt");
+
+    // Upload using plain path
+    bfs_cmd(&config_path)
+        .args([
+            "bucketfs",
+            "cp",
+            src_file.to_str().unwrap(),
+            &plain_path,
+            "--profile",
+            "bfs",
+        ])
+        .assert()
+        .success();
+
+    // Download using a bfs:// URI as source
+    let bfs_uri_src = format!("bfs://default/{plain_path}");
+    let dst_file = dir.path().join("bfs_uri_download_result.txt");
+    bfs_cmd(&config_path)
+        .args([
+            "bucketfs",
+            "cp",
+            &bfs_uri_src,
+            dst_file.to_str().unwrap(),
+            "--profile",
+            "bfs",
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Downloaded"));
+
+    let downloaded = std::fs::read_to_string(&dst_file).unwrap();
+    assert_eq!(downloaded, upload_content);
+
+    cleanup_path(&config_path, &plain_path);
+}
