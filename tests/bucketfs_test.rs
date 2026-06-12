@@ -259,3 +259,287 @@ fn download_file_not_found() {
             predicate::str::contains("not found").or(predicate::str::contains("File not found")),
         );
 }
+
+#[test]
+fn upload_accepts_bfs_uri_destination() {
+    fixtures::require_bucketfs!();
+    let write_pw = fixtures::bfs_write_password();
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = write_bfs_config(dir.path(), &write_pw);
+    let prefix = unique_prefix();
+
+    let upload_content = "bfs_uri upload test content\n";
+    let src_file = dir.path().join("bfs_uri_upload.txt");
+    std::fs::write(&src_file, upload_content).unwrap();
+
+    let plain_path = format!("{prefix}bfs_uri_upload.txt");
+    let bfs_uri_dest = format!("bfs://default/{plain_path}");
+
+    // Upload using a bfs:// URI as destination
+    bfs_cmd(&config_path)
+        .args([
+            "bucketfs",
+            "cp",
+            src_file.to_str().unwrap(),
+            &bfs_uri_dest,
+            "--profile",
+            "bfs",
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Uploaded"));
+
+    // Verify file is downloadable by its plain path
+    let dst_file = dir.path().join("bfs_uri_upload_dl.txt");
+    bfs_cmd(&config_path)
+        .args([
+            "bucketfs",
+            "cp",
+            &plain_path,
+            dst_file.to_str().unwrap(),
+            "--profile",
+            "bfs",
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Downloaded"));
+
+    let downloaded = std::fs::read_to_string(&dst_file).unwrap();
+    assert_eq!(downloaded, upload_content);
+
+    cleanup_path(&config_path, &plain_path);
+}
+
+#[test]
+fn download_accepts_bfs_uri_source() {
+    fixtures::require_bucketfs!();
+    let write_pw = fixtures::bfs_write_password();
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = write_bfs_config(dir.path(), &write_pw);
+    let prefix = unique_prefix();
+
+    let upload_content = "bfs_uri download test content\n";
+    let src_file = dir.path().join("bfs_uri_download.txt");
+    std::fs::write(&src_file, upload_content).unwrap();
+
+    let plain_path = format!("{prefix}bfs_uri_download.txt");
+
+    // Upload using plain path
+    bfs_cmd(&config_path)
+        .args([
+            "bucketfs",
+            "cp",
+            src_file.to_str().unwrap(),
+            &plain_path,
+            "--profile",
+            "bfs",
+        ])
+        .assert()
+        .success();
+
+    // Download using a bfs:// URI as source
+    let bfs_uri_src = format!("bfs://default/{plain_path}");
+    let dst_file = dir.path().join("bfs_uri_download_result.txt");
+    bfs_cmd(&config_path)
+        .args([
+            "bucketfs",
+            "cp",
+            &bfs_uri_src,
+            dst_file.to_str().unwrap(),
+            "--profile",
+            "bfs",
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Downloaded"));
+
+    let downloaded = std::fs::read_to_string(&dst_file).unwrap();
+    assert_eq!(downloaded, upload_content);
+
+    cleanup_path(&config_path, &plain_path);
+}
+
+#[test]
+fn upload_accepts_bfss_uri_destination() {
+    fixtures::require_bucketfs!();
+    let write_pw = fixtures::bfs_write_password();
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = write_bfs_config(dir.path(), &write_pw);
+    let prefix = unique_prefix();
+
+    let upload_content = "bfss_uri upload test content\n";
+    let src_file = dir.path().join("bfss_uri_upload.txt");
+    std::fs::write(&src_file, upload_content).unwrap();
+
+    let plain_path = format!("{prefix}bfss_uri_upload.txt");
+    let bfss_uri_dest = format!("bfss://default/{plain_path}");
+
+    // Upload using a bfss:// URI as destination
+    bfs_cmd(&config_path)
+        .args([
+            "bucketfs",
+            "cp",
+            src_file.to_str().unwrap(),
+            &bfss_uri_dest,
+            "--profile",
+            "bfs",
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Uploaded"));
+
+    // Verify file is downloadable by its plain path
+    let dst_file = dir.path().join("bfss_uri_upload_dl.txt");
+    bfs_cmd(&config_path)
+        .args([
+            "bucketfs",
+            "cp",
+            &plain_path,
+            dst_file.to_str().unwrap(),
+            "--profile",
+            "bfs",
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Downloaded"));
+
+    let downloaded = std::fs::read_to_string(&dst_file).unwrap();
+    assert_eq!(downloaded, upload_content);
+
+    cleanup_path(&config_path, &plain_path);
+}
+
+#[test]
+fn download_accepts_bfss_uri_source() {
+    fixtures::require_bucketfs!();
+    let write_pw = fixtures::bfs_write_password();
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = write_bfs_config(dir.path(), &write_pw);
+    let prefix = unique_prefix();
+
+    let upload_content = "bfss_uri download test content\n";
+    let src_file = dir.path().join("bfss_uri_download.txt");
+    std::fs::write(&src_file, upload_content).unwrap();
+
+    let plain_path = format!("{prefix}bfss_uri_download.txt");
+
+    // Upload using plain path
+    bfs_cmd(&config_path)
+        .args([
+            "bucketfs",
+            "cp",
+            src_file.to_str().unwrap(),
+            &plain_path,
+            "--profile",
+            "bfs",
+        ])
+        .assert()
+        .success();
+
+    // Download using a bfss:// URI as source
+    let bfss_uri_src = format!("bfss://default/{plain_path}");
+    let dst_file = dir.path().join("bfss_uri_download_result.txt");
+    bfs_cmd(&config_path)
+        .args([
+            "bucketfs",
+            "cp",
+            &bfss_uri_src,
+            dst_file.to_str().unwrap(),
+            "--profile",
+            "bfs",
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Downloaded"));
+
+    let downloaded = std::fs::read_to_string(&dst_file).unwrap();
+    assert_eq!(downloaded, upload_content);
+
+    cleanup_path(&config_path, &plain_path);
+}
+
+#[test]
+fn bfss_uri_infers_tls_overrides_profile_false() {
+    fixtures::require_bucketfs!();
+    let write_pw = fixtures::bfs_write_password();
+    let dir = tempfile::tempdir().unwrap();
+
+    // Write a config with bfs_tls = false to verify bfss:// URI inference overrides it
+    let config_dir = dir.path().join(".exapump");
+    std::fs::create_dir_all(&config_dir).unwrap();
+    let config_path = config_dir.join("config.toml");
+    std::fs::write(
+        &config_path,
+        format!(
+            r#"
+[bfs]
+host = "localhost"
+port = 8563
+user = "sys"
+password = "exasol"
+tls = true
+validate_certificate = false
+bfs_write_password = "{write_pw}"
+bfs_tls = false
+bfs_validate_certificate = false
+"#
+        ),
+    )
+    .unwrap();
+
+    let prefix = unique_prefix();
+    let src_file = dir.path().join("bfss_tls_infer.txt");
+    std::fs::write(&src_file, "bfss tls inference test\n").unwrap();
+
+    let plain_path = format!("{prefix}bfss_tls_infer.txt");
+    let bfss_uri_dest = format!("bfss://default/{plain_path}");
+
+    // bfss:// URI must infer TLS and succeed despite profile having bfs_tls = false
+    bfs_cmd(&config_path)
+        .args([
+            "bucketfs",
+            "cp",
+            src_file.to_str().unwrap(),
+            &bfss_uri_dest,
+            "--profile",
+            "bfs",
+        ])
+        .assert()
+        .success();
+
+    cleanup_path(&config_path, &plain_path);
+}
+
+#[test]
+fn bfss_uri_tls_overridden_by_explicit_flag() {
+    fixtures::require_bucketfs!();
+    let write_pw = fixtures::bfs_write_password();
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = write_bfs_config(dir.path(), &write_pw);
+    let prefix = unique_prefix();
+
+    let src_file = dir.path().join("bfss_flag_override.txt");
+    std::fs::write(&src_file, "bfss explicit flag test\n").unwrap();
+
+    let plain_path = format!("{prefix}bfss_flag_override.txt");
+    let bfss_uri_dest = format!("bfss://default/{plain_path}");
+
+    // Explicit --bfs-tls false disables TLS even for a bfss:// URI, so port 2581 (TLS-only) must reject the connection
+    bfs_cmd(&config_path)
+        .args([
+            "bucketfs",
+            "cp",
+            src_file.to_str().unwrap(),
+            &bfss_uri_dest,
+            "--profile",
+            "bfs",
+            "--bfs-tls",
+            "false",
+        ])
+        .assert()
+        .failure()
+        .stderr(
+            predicate::str::contains("not reachable")
+                .or(predicate::str::contains("error sending request")),
+        );
+}

@@ -4,7 +4,7 @@ Core file operations against BucketFS via its HTTP/HTTPS REST API. The API uses 
 
 ## Background
 
-BucketFS exposes files through HTTP GET/PUT/DELETE. Listing returns newline-separated file paths. Upload uses HTTP PUT with the file body. Download uses HTTP GET. Delete uses HTTP DELETE. The `exapump bucketfs` commands map CLI arguments to these HTTP calls.
+BucketFS exposes files through HTTP GET/PUT/DELETE. Listing returns newline-separated file paths. Upload uses HTTP PUT with the file body. Download uses HTTP GET. Delete uses HTTP DELETE. The `exapump bucketfs` commands map CLI arguments to these HTTP calls. Source and destination path arguments are normalised by the URI-handling layer (see `bucketfs/uri-handling`) before being used to compose HTTP URLs.
 
 ## Scenarios
 

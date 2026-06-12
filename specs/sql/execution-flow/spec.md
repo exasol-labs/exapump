@@ -4,7 +4,7 @@ The `sql` command splits input into individual statements, classifies them by ty
 
 ## Background
 
-SQL input may contain multiple semicolon-separated statements. Statements are split respecting quoted strings (single quotes for values, double quotes for identifiers) AND comments (`-- ...` line comments and `/* ... */` block comments). Empty statements (bare semicolons, trailing semicolons) are silently skipped. Statement classification uses the first SQL keyword AFTER any leading comments are skipped, but the original text is preserved verbatim for execution.
+SQL input may contain multiple semicolon-separated statements. Statements are split respecting quoted strings (single quotes for values, double quotes for identifiers) AND comments (`-- ...` line comments and `/* ... */` block comments). Empty statements (bare semicolons, trailing semicolons) are silently skipped. A `CREATE … SCRIPT … AS` body is treated as one statement up to a line containing only `/` (the exaplus terminator); semicolons inside the body do not split it. Statement classification uses the first SQL keyword AFTER any leading comments are skipped, but the original text is preserved verbatim for execution.
 
 ## Scenarios
 
@@ -188,3 +188,37 @@ SQL input may contain multiple semicolon-separated statements. Statements are sp
 * *THEN* the command MUST fail with an error message `No SQL statements to execute`
 * *AND* no connection attempt MUST be made
 * *AND* the exit code MUST be non-zero
+
+### Scenario: CREATE SCRIPT body with internal semicolons is one statement
+
+* *GIVEN* the SQL input is a `CREATE OR REPLACE LUA SCRIPT TEST.HELLO() RETURNS TABLE AS` block whose body contains `local x = 1;` and other internal semicolons, terminated by a line containing only `/`
+* *WHEN* the command splits statements
+* *THEN* it MUST produce exactly 1 statement
+* *AND* the internal semicolons in the script body MUST NOT split the statement
+
+### Scenario: Lone slash terminator is excluded from the script statement text
+
+* *GIVEN* the SQL input is a `CREATE … SCRIPT … AS` block terminated by a line containing only `/`
+* *WHEN* the command splits statements
+* *THEN* the emitted statement text MUST NOT contain the terminating lone `/` line
+* *AND* the emitted statement text MUST end with the last line of the script body
+
+### Scenario: CREATE SCRIPT block mixed with regular statements
+
+* *GIVEN* the SQL input contains a regular statement, then a `CREATE … SCRIPT … AS` block terminated by a lone `/` line, then a further regular statement
+* *WHEN* the command splits statements
+* *THEN* it MUST produce exactly 3 statements
+* *AND* the script block MUST be a single statement with its internal semicolons preserved, while the surrounding regular statements split on their top-level semicolons
+
+### Scenario: PYTHON3 ADAPTER SCRIPT header is recognised
+
+* *GIVEN* the SQL input is a `CREATE OR REPLACE PYTHON3 ADAPTER SCRIPT schema.name() AS` block whose body contains internal semicolons, terminated by a lone `/` line
+* *WHEN* the command splits statements
+* *THEN* it MUST produce exactly 1 statement
+* *AND* the multi-keyword header `PYTHON3 ADAPTER SCRIPT` MUST be recognised so the body is treated as a script body
+
+### Scenario: CREATE SCRIPT without AS before semicolon does not enter script-body mode
+
+* *GIVEN* the SQL input contains the tokens `CREATE` and `SCRIPT` but reaches a top-level semicolon before any `AS` keyword, followed by a second statement
+* *WHEN* the command splits statements
+* *THEN* it MUST split on the top-level semicolon as usual and produce exactly 2 statements
