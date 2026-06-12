@@ -48,12 +48,15 @@ pub(crate) use require_exasol;
 /// Extracts BucketFS write password from the running Exasol Docker container.
 /// Shells out to `docker exec` to read EXAConf and decode the base64 password.
 /// Panics if the container is not running or BucketFS is not configured.
+/// The container name defaults to `exasol-test` but can be overridden via
+/// the `EXASOL_CONTAINER` environment variable.
 #[allow(dead_code)]
 pub fn bfs_write_password() -> String {
+    let container = std::env::var("EXASOL_CONTAINER").unwrap_or_else(|_| "exasol-test".to_string());
     let output = std::process::Command::new("docker")
-        .args(["exec", "exasol-test", "cat", "/exa/etc/EXAConf"])
+        .args(["exec", &container, "cat", "/exa/etc/EXAConf"])
         .output()
-        .expect("Failed to exec into exasol-test container");
+        .expect("Failed to exec into exasol container");
     let exaconf = String::from_utf8(output.stdout).expect("EXAConf is not valid UTF-8");
     let line = exaconf
         .lines()

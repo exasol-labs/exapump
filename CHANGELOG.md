@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.10.1
+
+- Fix `bucketfs cp` mangling `bfs://` URIs into malformed HTTP URLs: strip the `bfs://<bucket>/` prefix before composing the HTTP request URL so both upload and download accept `bfs://` URIs (#22)
+- Fix SQL statement splitter breaking `CREATE … SCRIPT` bodies on internal semicolons: add a `ScriptBody` scanner state that treats the entire script body up to a lone `/` terminator line as a single statement (#23)
+
 ## 0.10.0
 
 - `profile add` prompts for the password via a hidden TTY prompt when `--password` is omitted in an interactive shell; non-TTY contexts still fail with a hint to use `profile init` or pass `--password`
