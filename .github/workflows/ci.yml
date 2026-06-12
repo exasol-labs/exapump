@@ -74,7 +74,11 @@ jobs:
 
       - name: Wait for Exasol to be ready
         timeout-minutes: 30
-        run: ./scripts/wait-for-exasol.sh exasol-test 1500
+        run: |
+          cargo run --bin exapump -- wait \
+            --container exasol-test \
+            --timeout-secs 1500 \
+            --dsn 'exasol://sys:exasol@localhost:8563?tls=true&validateservercertificate=0'
 
       - name: Integration tests
         env:

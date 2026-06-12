@@ -18,7 +18,8 @@ fn display_top_level_help() {
         .stdout(predicate::str::contains("profile"))
         .stdout(predicate::str::contains("bucketfs"))
         .stdout(predicate::str::contains("--help"))
-        .stdout(predicate::str::contains("--version"));
+        .stdout(predicate::str::contains("--version"))
+        .stdout(predicate::str::contains("wait"));
 }
 
 #[test]
@@ -40,7 +41,8 @@ fn no_arguments_shows_help() {
         .stdout(predicate::str::contains("sql"))
         .stdout(predicate::str::contains("export"))
         .stdout(predicate::str::contains("interactive"))
-        .stdout(predicate::str::contains("bucketfs"));
+        .stdout(predicate::str::contains("bucketfs"))
+        .stdout(predicate::str::contains("wait"));
 }
 
 #[test]

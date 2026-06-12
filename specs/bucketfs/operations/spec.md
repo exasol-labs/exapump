@@ -125,3 +125,26 @@ BucketFS exposes files through HTTP GET/PUT/DELETE. Listing returns newline-sepa
 * *GIVEN* the `cp` subcommand receives a source and destination
 * *WHEN* the source is not an existing local file path
 * *THEN* the operation MUST be treated as a download (BucketFS → local)
+
+### Scenario: Upload accepts a bfs:// URI destination
+
+* *GIVEN* a local file exists at `<source>` and valid BucketFS write parameters are provided for bucket `default`
+* *WHEN* the user runs `exapump bucketfs cp <source> bfs://default/<path>`
+* *THEN* the file MUST be uploaded to BucketFS at `<path>` within the bucket
+* *AND* the HTTP request URL MUST NOT contain the `bfs://` prefix or repeat the bucket segment
+* *AND* the upload MUST NOT fail with an HTTP 400 response and the exit code MUST be 0
+
+### Scenario: Download accepts a bfs:// URI source
+
+* *GIVEN* a file exists in BucketFS at `<path>` within bucket `default` and valid BucketFS read parameters are provided
+* *WHEN* the user runs `exapump bucketfs cp bfs://default/<path> <local_destination>`
+* *THEN* the file MUST be downloaded to the local destination path
+* *AND* the HTTP request URL MUST NOT contain the `bfs://` prefix or repeat the bucket segment
+* *AND* the downloaded content MUST match the original file content and the exit code MUST be 0
+
+### Scenario: Plain destination path without bfs:// prefix still works
+
+* *GIVEN* a local file exists at `<source>` and valid BucketFS write parameters are provided
+* *WHEN* the user runs `exapump bucketfs cp <source> <plain_path>` where `<plain_path>` has no `bfs://` prefix
+* *THEN* the file MUST be uploaded to BucketFS at `<plain_path>` unchanged
+* *AND* the exit code MUST be 0

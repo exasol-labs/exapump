@@ -19,7 +19,14 @@ async fn main() -> anyhow::Result<()> {
 
     dotenvy::dotenv().ok();
 
-    let cli = Cli::parse();
+    let cli = Cli::try_parse().unwrap_or_else(|e| {
+        if e.use_stderr() {
+            let _ = e.print();
+            std::process::exit(1);
+        } else {
+            e.exit();
+        }
+    });
 
     match cli.command {
         Some(Commands::Upload(args)) => {
@@ -39,6 +46,9 @@ async fn main() -> anyhow::Result<()> {
         }
         Some(Commands::Bucketfs(args)) => {
             commands::bucketfs::run(args).await?;
+        }
+        Some(Commands::Wait(args)) => {
+            commands::wait::run(args).await?;
         }
         None => {
             let mut cmd = <Cli as clap::CommandFactory>::command();

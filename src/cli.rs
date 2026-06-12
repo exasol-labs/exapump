@@ -22,6 +22,8 @@ pub enum Commands {
     Profile(crate::commands::profile::ProfileArgs),
     /// Interact with BucketFS (list, copy, delete files)
     Bucketfs(BucketFsArgs),
+    /// Wait until Exasol is ready
+    Wait(WaitArgs),
 }
 
 #[derive(clap::Args)]
@@ -201,6 +203,20 @@ pub struct BfsConnectionOverrides {
     /// BucketFS certificate validation override
     #[arg(long)]
     pub bfs_validate_certificate: Option<bool>,
+}
+
+#[derive(clap::Args)]
+pub struct WaitArgs {
+    #[command(flatten)]
+    pub conn: crate::connection::ConnectionArgs,
+
+    /// Docker container name to monitor (optional; skips Docker checks when omitted)
+    #[arg(long)]
+    pub container: Option<String>,
+
+    /// Maximum seconds to wait before timing out
+    #[arg(long, default_value_t = 1500)]
+    pub timeout_secs: u64,
 }
 
 #[derive(Subcommand)]

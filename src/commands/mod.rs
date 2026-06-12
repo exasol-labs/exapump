@@ -4,6 +4,7 @@ pub mod interactive;
 pub mod profile;
 pub mod sql;
 pub mod upload;
+pub mod wait;
 
 /// Splits "schema.table" into (Some("schema"), "table") or (None, "table").
 pub fn parse_table_name(table: &str) -> (Option<&str>, &str) {
