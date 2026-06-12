@@ -354,3 +354,17 @@ bfs_validate_certificate = false
 * *AND* stderr SHOULD suggest `chmod 600`
 * *AND* exapump MUST NOT change the file mode automatically
 * *AND* on non-unix platforms exapump MUST NOT fail because of permission handling
+
+### Scenario: bfss:// URI activates TLS when --bfs-tls is not set
+
+* *GIVEN* a profile with `bfs_tls = false`
+* *AND* the `--bfs-tls` flag is NOT provided on the command line
+* *WHEN* a `bfss://` URI is present as source or destination in `bucketfs cp`
+* *THEN* the resolved BucketFS connection MUST use TLS regardless of the profile `bfs_tls` value
+
+### Scenario: Explicit --bfs-tls false suppresses bfss:// TLS inference
+
+* *GIVEN* a `bfss://` URI is provided as source or destination in `bucketfs cp`
+* *WHEN* the user explicitly passes `--bfs-tls false`
+* *THEN* the resolved BucketFS connection MUST NOT use TLS
+* *AND* the explicit CLI flag MUST take precedence over URI-based TLS inference
