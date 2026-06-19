@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.11.0
+
+- New `exapump wait` subcommand: blocks until an Exasol database is ready, then exits. Readiness is checked in two phases (TCP port open, then a `SELECT 1` succeeds) on a fixed 5s poll interval; `--timeout-secs` sets the deadline (default 1500). Optional `--container` verifies a named Docker container is running before/during polling and dumps its logs on failure. Distinct exit codes for CI branching: 0 ready, 2 timeout, 3 container failure.
+- CI and `scripts/integration-test.sh` now use `exapump wait`; removed the ad-hoc `scripts/wait-for-exasol.sh`.
+
 ## 0.10.1
 
 - Fix `bucketfs cp` mangling `bfs://` URIs into malformed HTTP URLs: strip the `bfs://<bucket>/` prefix before composing the HTTP request URL so both upload and download accept `bfs://` URIs (#22)
