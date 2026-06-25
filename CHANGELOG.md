@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.11.2
+
+- Bump exarrow-rs to 0.13.0 (TLS connections can now accept a self-signed server certificate via the builder; internal dead-code/over-engineering cleanup).
+
 ## 0.11.1
 
 - Bump exarrow-rs to 0.12.8 (multi-row batch prepared-statement execution).
