@@ -876,7 +876,7 @@ checksum = "dea2df4cf52843e0452895c455a1a2cfbb842a1e7329671acf418fdc53ed4c59"
 
 [[package]]
 name = "exapump"
-version = "0.11.1"
+version = "0.11.2"
 dependencies = [
  "anyhow",
  "arrow",
@@ -905,9 +905,9 @@ dependencies = [
 
 [[package]]
 name = "exarrow-rs"
-version = "0.12.8"
+version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4193d2e6555dc1a5c4c39701d96ee6876179d83fb61dff4e87c4baff11734d4c"
+checksum = "d434e563d3cbe7775c361509b1fec245b564774d5c18a694674457efa2dad560"
 dependencies = [
  "arrow",
  "async-trait",
