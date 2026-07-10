@@ -1,5 +1,10 @@
 name: CI
 
+# NOTE: paths-ignore below only stays safe as long as this workflow's
+# checks are never made a required status check in the main ruleset (they
+# aren't today -- only 1 approving review is required). If that changes,
+# skipped-vs-missing checks can block merges on spec/docs-only PRs; switch
+# to an always-on trigger with a path-filter step gating the expensive jobs.
 on:
   push:
     branches: [main]
