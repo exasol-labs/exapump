@@ -33,7 +33,11 @@ There is no simple `command -> done` workflow for these common cases. Every opti
 4. **Parallel multi-file import** — leverage exarrow-rs parallel connections for high-throughput transfer
 5. **Dry-run mode** — preview the inferred schema and planned CREATE TABLE without executing
 6. **Single-command export** — export a table or SQL query result to a local CSV or Parquet file
-7. **SQL execution** — run a SQL statement and get results as CSV or JSON (not a REPL)
+7. **SQL execution** — run one or more `;`-separated SQL statements (DDL/DML/query) and get results as CSV or JSON
+8. **BucketFS operations** — upload, list, and delete files directly in Exasol's BucketFS
+9. **Profile-based connection config** — named connection profiles in a config file, resolved alongside `--dsn`/`EXAPUMP_DSN`
+10. **Interactive SQL shell** — a REPL (`exapump interactive`) with dot-commands, multi-statement script execution, and table-formatted output
+11. **Readiness polling** — `exapump wait` blocks until a target Exasol instance is reachable, for CI/E2E setup
 
 ## Out of Scope
 
@@ -42,7 +46,6 @@ There is no simple `command -> done` workflow for these common cases. Every opti
 - GUI or web interface
 - Database-to-database replication
 - Streaming/real-time ingestion (exapump is batch-oriented)
-- Interactive REPL or shell (SQL is single-statement, not interactive)
 
 ## Domain Glossary
 
@@ -53,6 +56,8 @@ Standard Exasol and Arrow terminology applies. No project-specific redefinitions
 | DSN | Data Source Name — connection string in the format `exasol://user:pwd@host:port` |
 | Schema inference | Detecting column names, types, and nullability from file metadata (Parquet) or row sampling (CSV) |
 | exarrow-rs | The underlying Rust library providing Arrow-native Exasol connectivity, schema inference, type mapping, and parallel transfer |
+| BucketFS | Exasol's built-in distributed file storage, used for staging files (e.g. Script Language Containers) accessible to the database |
+| Profile | A named connection configuration (host, user, credentials, TLS settings) stored in the exapump config file |
 
 ---
 
@@ -95,8 +100,12 @@ exapump/
 │   └── commands/
 │       ├── mod.rs
 │       ├── upload.rs         # Import command
-│       ├── export.rs         # Export command (planned)
-│       └── sql.rs            # SQL command (planned)
+│       ├── export.rs         # Export command
+│       ├── sql.rs            # SQL command
+│       ├── bucketfs.rs       # BucketFS upload/list/delete
+│       ├── interactive.rs    # Interactive SQL REPL
+│       ├── profile.rs        # Connection profile management
+│       └── wait.rs           # Readiness polling (exapump wait)
 ├── tests/              # Integration tests
 ├── specs/              # Feature specifications
 ├── Cargo.toml          # Dependencies and metadata
