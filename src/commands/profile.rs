@@ -340,7 +340,7 @@ fn add(name: &str, overrides: ProfileOverrides, set_default: bool) -> anyhow::Re
     };
 
     if set_default {
-        for (_, existing_profile) in config.iter_mut() {
+        for existing_profile in config.values_mut() {
             existing_profile.default = None;
         }
     }
@@ -465,7 +465,7 @@ fn init(args: InitArgs) -> anyhow::Result<()> {
 
     let mut config = existing;
     if make_default {
-        for (_, existing_profile) in config.iter_mut() {
+        for existing_profile in config.values_mut() {
             existing_profile.default = None;
         }
     }
