@@ -33,7 +33,7 @@ There is no simple `command -> done` workflow for these common cases. Every opti
 4. **Parallel multi-file import** — leverage exarrow-rs parallel connections for high-throughput transfer
 5. **Dry-run mode** — preview the inferred schema and planned CREATE TABLE without executing
 6. **Single-command export** — export a table or SQL query result to a local CSV or Parquet file
-7. **SQL execution** — run a single SQL statement (DDL/DML/query) and get results as CSV or JSON
+7. **SQL execution** — run one or more `;`-separated SQL statements (DDL/DML/query) and get results as CSV or JSON
 8. **BucketFS operations** — upload, list, and delete files directly in Exasol's BucketFS
 9. **Profile-based connection config** — named connection profiles in a config file, resolved alongside `--dsn`/`EXAPUMP_DSN`
 10. **Interactive SQL shell** — a REPL (`exapump interactive`) with dot-commands, multi-statement script execution, and table-formatted output
