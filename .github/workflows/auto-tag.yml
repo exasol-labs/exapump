@@ -34,56 +34,34 @@ jobs:
             echo "bumped=true" >> "$GITHUB_OUTPUT"
           fi
 
-  build-binaries:
+  build-binaries-linux:
     name: Binary (${{ matrix.name }})
     needs: [detect-version]
     if: needs.detect-version.outputs.bumped == 'true'
     runs-on: ${{ matrix.os }}
-    container: ${{ matrix.container }}
+    container: almalinux:8
     strategy:
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
-            container: almalinux:8
             name: exapump-linux-x86_64
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-24.04-arm
-            container: almalinux:8
             name: exapump-linux-aarch64
-          - target: x86_64-apple-darwin
-            os: macos-latest
-            container: ""
-            name: exapump-macos-x86_64
-          - target: aarch64-apple-darwin
-            os: macos-latest
-            container: ""
-            name: exapump-macos-aarch64
-          - target: x86_64-pc-windows-msvc
-            os: windows-latest
-            container: ""
-            name: exapump-windows-x86_64
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust toolchain (container)
-        if: matrix.container != ''
+      - name: Install Rust toolchain
         run: |
-          dnf install -y gcc git binutils curl ca-certificates
+          dnf install -y gcc binutils curl ca-certificates
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --target ${{ matrix.target }}
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-
-      - name: Install Rust toolchain
-        if: matrix.container == ''
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
 
       - name: Build
         run: cargo build --release --target ${{ matrix.target }}
 
       - name: Enforce glibc ceiling
-        if: matrix.container != ''
         run: |
           max_allowed=GLIBC_2.28
           ceiling=$(objdump -T target/${{ matrix.target }}/release/exapump | grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sort -V | tail -1)
@@ -93,6 +71,40 @@ jobs:
             echo "glibc ceiling $ceiling exceeds the allowed maximum of $max_allowed"
             exit 1
           fi
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: target/${{ matrix.target }}/release/exapump
+
+  build-binaries-native:
+    name: Binary (${{ matrix.name }})
+    needs: [detect-version]
+    if: needs.detect-version.outputs.bumped == 'true'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            name: exapump-macos-x86_64
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            name: exapump-macos-aarch64
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            name: exapump-windows-x86_64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }}
 
       - name: Upload binary (unix)
         if: runner.os != 'Windows'
@@ -110,7 +122,7 @@ jobs:
 
   release:
     name: Release
-    needs: [detect-version, build-binaries]
+    needs: [detect-version, build-binaries-linux, build-binaries-native]
     if: needs.detect-version.outputs.bumped == 'true'
     runs-on: ubuntu-latest
     permissions:

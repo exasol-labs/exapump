@@ -154,7 +154,7 @@ exapump sql 'SELECT * FROM t' --dsn ... --format json
 
 ## Constraints
 
-- **Distribution**: Single binary. No bundled runtime dependencies beyond libc, which links dynamically.
+- **Distribution**: Single binary with no bundled runtime dependencies. It links dynamically against the host's system glibc.
 - **Linux glibc floor**: Linux release binaries target glibc 2.28 (AlmaLinux 8 / manylinux_2_28 baseline), so they run on enterprise distributions such as SLES 15 SP7.
 - **Platforms**: Linux (x86_64, aarch64), macOS (x86_64, aarch64). Windows via WSL only.
 - **Performance**: Throughput bounded by exarrow-rs and network. exapump itself must add negligible overhead.
