@@ -1,6 +1,6 @@
 [package]
 name = "exapump"
-version = "0.11.3"
+version = "0.11.4"
 edition = "2021"
 description = "The simplest path from file to Exasol table — a single-binary CLI for CSV and Parquet ingest."
 license = "MIT"
@@ -11,7 +11,7 @@ name = "exapump"
 path = "src/main.rs"
 
 [dependencies]
-exarrow-rs = { version = "0.13.0", features = ["native", "websocket"] }
+exarrow-rs = { version = "0.14.0", features = ["native", "websocket"] }
 clap = { version = "4", features = ["derive", "env"] }
 tokio = { version = "1", features = ["full"] }
 anyhow = "1"
