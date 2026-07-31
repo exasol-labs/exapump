@@ -11,7 +11,7 @@ name = "exapump"
 path = "src/main.rs"
 
 [dependencies]
-exarrow-rs = { version = "0.13.0", features = ["native", "websocket"] }
+exarrow-rs = { version = "0.15.1", features = ["native", "websocket"] }
 clap = { version = "4", features = ["derive", "env"] }
 tokio = { version = "1", features = ["full"] }
 anyhow = "1"
@@ -29,7 +29,7 @@ dirs = "6"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 rpassword = "7"
-inquire = { version = "0.7", default-features = false, features = ["crossterm"] }
+inquire = { version = "0.9", default-features = false, features = ["crossterm"] }
 
 [dev-dependencies]
 assert_cmd = "2"
