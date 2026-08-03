@@ -5,13 +5,14 @@ echo "=== Formatting ==="
 cargo fmt --all -- --check
 
 echo "=== Clippy ==="
-cargo clippy --all-targets -- -D warnings
+cargo clippy --all-targets --all-features -- -D warnings
 
-echo "=== License check ==="
+echo "=== License and advisory check ==="
 if command -v cargo-deny &>/dev/null; then
     cargo deny check licenses
+    cargo deny check advisories
 else
-    echo "WARN: cargo-deny not installed, skipping license check"
+    echo "WARN: cargo-deny not installed, skipping license/advisory check"
     echo "      Install with: cargo install cargo-deny"
 fi
 
