@@ -5,12 +5,13 @@
 # exapump
 
 [![Rust](https://img.shields.io/badge/rust-stable-brightgreen.svg)](https://www.rust-lang.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
+[![spec|driven](https://img.shields.io/badge/spec-driven-blue)](./specs/)
+
 [![CI](https://github.com/exasol-labs/exapump/actions/workflows/ci.yml/badge.svg)](https://github.com/exasol-labs/exapump/actions/workflows/ci.yml)
 [![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=exasol-labs_exapump&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=exasol-labs_exapump)
 [![Coverage](https://sonarcloud.io/api/project_badges/measure?project=exasol-labs_exapump&metric=coverage)](https://sonarcloud.io/summary/new_code?id=exasol-labs_exapump)
 [![Reliability Rating](https://sonarcloud.io/api/project_badges/measure?project=exasol-labs_exapump&metric=reliability_rating)](https://sonarcloud.io/summary/new_code?id=exasol-labs_exapump)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
-[![spec|driven](https://img.shields.io/badge/spec-driven-blue)](./specs/)
 
 
 Single-binary CLI for Exasol data exchange — import, export, and SQL in one command.
