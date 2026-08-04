@@ -1,10 +1,14 @@
+use std::io::Write;
+
 use arrow::array::Array;
 use arrow::record_batch::RecordBatch;
 use comfy_table::{presets::UTF8_FULL, ContentArrangement, Table};
 use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
 
-use super::sql::{error_hint, split_statements, write_csv, write_json, StatementType};
+use super::sql::{
+    error_hint, execute_one, split_statements, total_rows, write_csv, write_json, StatementOutcome,
+};
 
 const PRIMARY_PROMPT: &str = "exapump> ";
 const CONTINUATION_PROMPT: &str = "     > ";
@@ -146,13 +150,28 @@ fn format_table(batches: &[RecordBatch]) -> String {
     table.to_string()
 }
 
-fn row_count(batches: &[RecordBatch]) -> usize {
-    batches.iter().map(|b| b.num_rows()).sum()
+#[derive(Debug, PartialEq)]
+enum LineKind {
+    Dot(DotCommand),
+    Sql,
 }
 
-pub async fn run(args: crate::cli::InteractiveArgs) -> anyhow::Result<()> {
-    let mut conn = args.conn.connect().await?;
+/// Classify one line of REPL input against whether the statement buffer is
+/// currently empty. A leading `.` starts a dot-command only at a statement
+/// boundary; the same text mid-buffer is ordinary SQL, since multi-line SQL
+/// text may legitimately contain a line starting with `.`.
+fn classify_line(line: &str, buffer_is_empty: bool) -> LineKind {
+    if buffer_is_empty && line.trim().starts_with('.') {
+        LineKind::Dot(parse_dot_command(line))
+    } else {
+        LineKind::Sql
+    }
+}
 
+/// Build the line editor and load its persisted history file, creating the
+/// history file's parent directory first if it is missing. Returns the
+/// editor together with the path `run` later saves history back to.
+fn init_editor() -> anyhow::Result<(DefaultEditor, std::path::PathBuf)> {
     let mut rl = DefaultEditor::new()?;
     let history_path = dirs::home_dir()
         .map(|h| h.join(".exapump").join("history"))
@@ -161,51 +180,82 @@ pub async fn run(args: crate::cli::InteractiveArgs) -> anyhow::Result<()> {
         let _ = std::fs::create_dir_all(parent);
     }
     let _ = rl.load_history(&history_path);
+    Ok((rl, history_path))
+}
 
+fn print_banner() {
     let version = env!("CARGO_PKG_VERSION");
     println!(
         "exapump v{} \u{2014} Interactive SQL session\nType .help for commands, or enter SQL terminated with ;",
         version
     );
+}
 
-    let mut buffer = String::new();
-    let mut format = InteractiveFormat::Table;
+/// The REPL's mutable state across loop iterations: the database connection,
+/// the line editor, the in-progress statement buffer, and the current output
+/// format. Grouping them lets [`ReplSession::dispatch_line`] take a single
+/// receiver instead of four independent `&mut` parameters.
+struct ReplSession {
+    conn: exarrow_rs::Connection,
+    rl: DefaultEditor,
+    buffer: String,
+    format: InteractiveFormat,
+}
+
+impl ReplSession {
+    /// Handle one line read from the REPL: a dot-command dispatches immediately,
+    /// while SQL text is appended to the buffer and executed once it ends in `;`.
+    /// Returns whether the REPL loop should continue reading or exit.
+    async fn dispatch_line(&mut self, line: &str) -> ControlFlow {
+        match classify_line(line, self.buffer.is_empty()) {
+            LineKind::Dot(cmd) => handle_dot_command(cmd, &mut self.format),
+            LineKind::Sql => {
+                let ready = process_line(line, &mut self.buffer);
+                if ready {
+                    let _ = self.rl.add_history_entry(self.buffer.as_str());
+                    let statements = split_statements(&self.buffer);
+                    self.buffer.clear();
+
+                    for stmt in &statements {
+                        execute_statement(&mut self.conn, stmt, self.format).await;
+                    }
+                }
+                ControlFlow::Continue
+            }
+        }
+    }
+}
+
+pub async fn run(args: crate::cli::InteractiveArgs) -> anyhow::Result<()> {
+    let conn = args.conn.connect().await?;
+    let (rl, history_path) = init_editor()?;
+    print_banner();
+
+    let mut session = ReplSession {
+        conn,
+        rl,
+        buffer: String::new(),
+        format: InteractiveFormat::Table,
+    };
 
     loop {
-        let prompt = if buffer.is_empty() {
+        let prompt = if session.buffer.is_empty() {
             PRIMARY_PROMPT
         } else {
             CONTINUATION_PROMPT
         };
 
-        match rl.readline(prompt) {
-            Ok(line) => {
-                if buffer.is_empty() && line.trim().starts_with('.') {
-                    let cmd = parse_dot_command(&line);
-                    match handle_dot_command(cmd, &mut format) {
-                        ControlFlow::Continue => continue,
-                        ControlFlow::Exit => break,
-                    }
-                }
-
-                let ready = process_line(&line, &mut buffer);
-
-                if ready {
-                    let _ = rl.add_history_entry(buffer.as_str());
-                    let statements = split_statements(&buffer);
-                    buffer.clear();
-
-                    for stmt in &statements {
-                        execute_statement(&mut conn, stmt, format).await;
-                    }
-                }
-            }
+        match session.rl.readline(prompt) {
+            Ok(line) => match session.dispatch_line(&line).await {
+                ControlFlow::Continue => continue,
+                ControlFlow::Exit => break,
+            },
             Err(ReadlineError::Interrupted) => {
-                if buffer.is_empty() {
+                if session.buffer.is_empty() {
                     println!("Bye!");
                     break;
                 } else {
-                    buffer.clear();
+                    session.buffer.clear();
                     println!();
                 }
             }
@@ -219,7 +269,69 @@ pub async fn run(args: crate::cli::InteractiveArgs) -> anyhow::Result<()> {
         }
     }
 
-    let _ = rl.save_history(&history_path);
+    let _ = session.rl.save_history(&history_path);
+    Ok(())
+}
+
+/// Render `batches` in `format` to `writer`. Table output is emitted as a
+/// single `writeln!` so its bytes match the REPL's original `println!`.
+fn render_batches(
+    batches: &[RecordBatch],
+    format: InteractiveFormat,
+    writer: &mut impl Write,
+) -> anyhow::Result<()> {
+    match format {
+        InteractiveFormat::Table => writeln!(writer, "{}", format_table(batches))?,
+        InteractiveFormat::Csv => write_csv(batches, writer)?,
+        InteractiveFormat::Json => write_json(batches, writer)?,
+    }
+    Ok(())
+}
+
+/// The REPL's trailing count line for a query result; singular for one row.
+fn row_count_line(rows: usize) -> String {
+    if rows == 1 {
+        "1 row".to_string()
+    } else {
+        format!("{} rows", rows)
+    }
+}
+
+/// The REPL's trailing count line for a DML statement; singular for one row.
+fn rows_affected_line(rows: i64) -> String {
+    if rows == 1 {
+        "1 row affected".to_string()
+    } else {
+        format!("{} rows affected", rows)
+    }
+}
+
+/// Print one query result to stdout: the rendered batches, then the row count.
+/// A rendering failure is reported without suppressing the count line, which is
+/// how the REPL has always treated a half-written CSV or JSON result.
+fn print_result(batches: &[RecordBatch], format: InteractiveFormat) {
+    if let Err(e) = render_batches(batches, format, &mut std::io::stdout()) {
+        eprintln!("Error: {}", e);
+    }
+    println!("{}", row_count_line(total_rows(batches)));
+}
+
+/// Execute one statement against `conn` and print its outcome in `format`.
+/// How a statement kind is run belongs to [`execute_one`]; this function owns
+/// only how the REPL reports the result, which is the one thing that differs
+/// from `exapump sql`. Query errors are returned rather than reported here so
+/// that every statement kind shares a single error-reporting site in
+/// [`execute_statement`].
+async fn execute_and_report(
+    conn: &mut exarrow_rs::Connection,
+    stmt: &str,
+    format: InteractiveFormat,
+) -> Result<(), exarrow_rs::QueryError> {
+    match execute_one(conn, stmt).await? {
+        StatementOutcome::Rows(batches) => print_result(&batches, format),
+        StatementOutcome::RowsAffected(rows) => println!("{}", rows_affected_line(rows)),
+        StatementOutcome::Ok => println!("OK"),
+    }
     Ok(())
 }
 
@@ -228,91 +340,8 @@ async fn execute_statement(
     stmt: &str,
     format: InteractiveFormat,
 ) {
-    let stmt_type = StatementType::from_sql(stmt);
-
-    match stmt_type {
-        StatementType::Query => match conn.execute(stmt).await {
-            Ok(result_set) => match result_set.fetch_all().await {
-                Ok(batches) => {
-                    let n = row_count(&batches);
-                    match format {
-                        InteractiveFormat::Table => {
-                            let tbl = format_table(&batches);
-                            println!("{}", tbl);
-                        }
-                        InteractiveFormat::Csv => {
-                            if let Err(e) = write_csv(&batches) {
-                                eprintln!("Error: {}", e);
-                            }
-                        }
-                        InteractiveFormat::Json => {
-                            if let Err(e) = write_json(&batches) {
-                                eprintln!("Error: {}", e);
-                            }
-                        }
-                    }
-                    if n == 1 {
-                        println!("1 row");
-                    } else {
-                        println!("{} rows", n);
-                    }
-                }
-                Err(e) => print_error(&e),
-            },
-            Err(e) => print_error(&e),
-        },
-        StatementType::Dml => match conn.execute_update(stmt).await {
-            Ok(n) => {
-                if n == 1 {
-                    println!("1 row affected");
-                } else {
-                    println!("{} rows affected", n);
-                }
-            }
-            Err(e) => print_error(&e),
-        },
-        StatementType::Ddl => match conn.execute_update(stmt).await {
-            Ok(_) => {
-                println!("OK");
-            }
-            Err(e) => print_error(&e),
-        },
-        StatementType::Execute => match conn.execute(stmt).await {
-            Ok(result_set) => {
-                if result_set.is_stream() {
-                    match result_set.fetch_all().await {
-                        Ok(batches) => {
-                            let n = row_count(&batches);
-                            match format {
-                                InteractiveFormat::Table => {
-                                    let tbl = format_table(&batches);
-                                    println!("{}", tbl);
-                                }
-                                InteractiveFormat::Csv => {
-                                    if let Err(e) = write_csv(&batches) {
-                                        eprintln!("Error: {}", e);
-                                    }
-                                }
-                                InteractiveFormat::Json => {
-                                    if let Err(e) = write_json(&batches) {
-                                        eprintln!("Error: {}", e);
-                                    }
-                                }
-                            }
-                            if n == 1 {
-                                println!("1 row");
-                            } else {
-                                println!("{} rows", n);
-                            }
-                        }
-                        Err(e) => print_error(&e),
-                    }
-                } else {
-                    println!("OK");
-                }
-            }
-            Err(e) => print_error(&e),
-        },
+    if let Err(e) = execute_and_report(conn, stmt, format).await {
+        print_error(&e);
     }
 }
 
@@ -408,6 +437,55 @@ mod tests {
     #[test]
     fn parse_dot_command_with_leading_whitespace() {
         assert_eq!(parse_dot_command("  .help"), DotCommand::Help);
+    }
+
+    // --- classify_line tests ---
+
+    #[test]
+    fn classify_line_recognizes_a_dot_command_at_a_statement_boundary() {
+        assert_eq!(
+            classify_line(".help", true),
+            LineKind::Dot(DotCommand::Help)
+        );
+    }
+
+    #[test]
+    fn classify_line_recognizes_a_dot_command_with_leading_whitespace() {
+        assert_eq!(
+            classify_line("  .exit", true),
+            LineKind::Dot(DotCommand::Exit)
+        );
+    }
+
+    #[test]
+    fn classify_line_recognizes_the_dot_command_variant_and_its_argument() {
+        assert_eq!(
+            classify_line(".format csv", true),
+            LineKind::Dot(DotCommand::Format(Some("csv".to_string())))
+        );
+    }
+
+    #[test]
+    fn classify_line_recognizes_an_unknown_dot_command() {
+        assert_eq!(
+            classify_line(".bogus", true),
+            LineKind::Dot(DotCommand::Unknown(".bogus".to_string()))
+        );
+    }
+
+    #[test]
+    fn classify_line_treats_a_leading_dot_mid_statement_as_sql() {
+        assert_eq!(classify_line(".help", false), LineKind::Sql);
+    }
+
+    #[test]
+    fn classify_line_treats_ordinary_sql_as_sql() {
+        assert_eq!(classify_line("SELECT 1;", true), LineKind::Sql);
+    }
+
+    #[test]
+    fn classify_line_treats_an_empty_line_as_sql() {
+        assert_eq!(classify_line("", true), LineKind::Sql);
     }
 
     // --- handle_dot_command tests ---
@@ -532,16 +610,112 @@ mod tests {
         assert!(output.contains("Bob"));
     }
 
+    // --- render_batches tests ---
+
     #[test]
-    fn row_count_across_batches() {
-        let batch1 = make_batch(vec!["Alice"], vec![Some(30)]);
-        let batch2 = make_batch(vec!["Bob", "Charlie"], vec![Some(25), Some(35)]);
-        assert_eq!(row_count(&[batch1, batch2]), 3);
+    fn render_batches_table_format_writes_the_formatted_table_and_one_trailing_newline() {
+        let batch = make_batch(vec!["Alice"], vec![Some(30)]);
+        let mut buf: Vec<u8> = Vec::new();
+        render_batches(
+            std::slice::from_ref(&batch),
+            InteractiveFormat::Table,
+            &mut buf,
+        )
+        .unwrap();
+        assert_eq!(
+            String::from_utf8(buf).unwrap(),
+            format!("{}\n", format_table(std::slice::from_ref(&batch)))
+        );
     }
 
     #[test]
-    fn row_count_empty() {
-        assert_eq!(row_count(&[]), 0);
+    fn render_batches_table_format_writes_the_empty_table_and_one_newline_for_no_batches() {
+        let mut buf: Vec<u8> = Vec::new();
+        render_batches(&[], InteractiveFormat::Table, &mut buf).unwrap();
+        assert_eq!(
+            String::from_utf8(buf).unwrap(),
+            format!("{}\n", format_table(&[]))
+        );
+    }
+
+    #[test]
+    fn render_batches_csv_format_writes_a_header_and_every_row() {
+        let batch = make_batch(vec!["Alice", "Bob"], vec![Some(30), Some(25)]);
+        let mut buf: Vec<u8> = Vec::new();
+        render_batches(&[batch], InteractiveFormat::Csv, &mut buf).unwrap();
+        assert_eq!(
+            String::from_utf8(buf).unwrap(),
+            "name,age\nAlice,30\nBob,25\n"
+        );
+    }
+
+    #[test]
+    fn render_batches_csv_format_writes_one_header_across_multiple_batches() {
+        let first = make_batch(vec!["Alice"], vec![Some(30)]);
+        let second = make_batch(vec!["Bob"], vec![Some(25)]);
+        let mut buf: Vec<u8> = Vec::new();
+        render_batches(&[first, second], InteractiveFormat::Csv, &mut buf).unwrap();
+        assert_eq!(
+            String::from_utf8(buf).unwrap(),
+            "name,age\nAlice,30\nBob,25\n"
+        );
+    }
+
+    #[test]
+    fn render_batches_csv_format_writes_nothing_for_no_batches() {
+        let mut buf: Vec<u8> = Vec::new();
+        render_batches(&[], InteractiveFormat::Csv, &mut buf).unwrap();
+        assert_eq!(String::from_utf8(buf).unwrap(), "");
+    }
+
+    #[test]
+    fn render_batches_json_format_writes_a_json_array_of_rows() {
+        let batch = make_batch(vec!["Alice"], vec![Some(30)]);
+        let mut buf: Vec<u8> = Vec::new();
+        render_batches(&[batch], InteractiveFormat::Json, &mut buf).unwrap();
+        assert_eq!(
+            String::from_utf8(buf).unwrap(),
+            r#"[{"name":"Alice","age":30}]"#
+        );
+    }
+
+    #[test]
+    fn render_batches_json_format_writes_an_empty_array_for_no_batches() {
+        let mut buf: Vec<u8> = Vec::new();
+        render_batches(&[], InteractiveFormat::Json, &mut buf).unwrap();
+        assert_eq!(String::from_utf8(buf).unwrap(), "[]");
+    }
+
+    // --- row_count_line / rows_affected_line tests ---
+
+    #[test]
+    fn row_count_line_is_singular_for_exactly_one_row() {
+        assert_eq!(row_count_line(1), "1 row");
+    }
+
+    #[test]
+    fn row_count_line_is_plural_for_no_rows() {
+        assert_eq!(row_count_line(0), "0 rows");
+    }
+
+    #[test]
+    fn row_count_line_is_plural_for_many_rows() {
+        assert_eq!(row_count_line(42), "42 rows");
+    }
+
+    #[test]
+    fn rows_affected_line_is_singular_for_exactly_one_row() {
+        assert_eq!(rows_affected_line(1), "1 row affected");
+    }
+
+    #[test]
+    fn rows_affected_line_is_plural_for_no_rows() {
+        assert_eq!(rows_affected_line(0), "0 rows affected");
+    }
+
+    #[test]
+    fn rows_affected_line_is_plural_for_many_rows() {
+        assert_eq!(rows_affected_line(7), "7 rows affected");
     }
 
     #[test]

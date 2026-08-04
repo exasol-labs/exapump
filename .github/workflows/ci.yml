@@ -73,6 +73,11 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@1.92.0
+        with:
+          components: llvm-tools-preview
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
 
       - name: Cache cargo registry
         uses: actions/cache@v4
@@ -96,7 +101,16 @@ jobs:
       - name: Integration tests
         env:
           REQUIRE_EXASOL: "1"
-        run: cargo test --verbose
+        run: cargo llvm-cov --lcov --output-path lcov.info
+
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lcov
+          path: lcov.info
+          if-no-files-found: error
+          retention-days: 1
 
       - name: Exasol container logs
         if: always()
@@ -108,46 +122,9 @@ jobs:
           docker stop exasol-test || true
           docker rm exasol-test || true
 
-  unit-tests:
-    name: Unit Tests
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@1.92.0
-        with:
-          components: llvm-tools-preview
-
-      - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@cargo-llvm-cov
-
-      - name: Cache cargo registry
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
-
-      - name: Run unit tests with coverage
-        run: cargo llvm-cov --bin exapump --lcov --output-path lcov.info
-
-      - name: Upload coverage
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: lcov
-          path: lcov.info
-          if-no-files-found: error
-          retention-days: 1
-
   sonar:
     name: Sonar Analysis
-    needs: [unit-tests]
+    needs: [integration-tests]
     runs-on: ubuntu-latest
     # Fork PRs don't get repo secrets, so SONAR_TOKEN would be empty and fail the scan.
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
@@ -179,7 +156,20 @@ jobs:
         with:
           name: lcov
 
+      - name: Read crate version
+        id: crate-version
+        run: |
+          set -euo pipefail
+          version=$(grep -m1 '^version' Cargo.toml | sed -E 's/version = "(.*)"/\1/')
+          if [ -z "$version" ]; then
+            echo "::error::Could not extract a version from Cargo.toml" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
       - name: SonarQube Cloud scan
         uses: SonarSource/sonarqube-scan-action@v8.2.1
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: -Dsonar.projectVersion=${{ steps.crate-version.outputs.version }}

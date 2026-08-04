@@ -1,10 +1,8 @@
 # Plan: fix-sonar-quality-gate
 
-> **Status:** blocked — see open-questions.md
-
 ## Summary
 
-Wire the integration test suite into the coverage report Sonar consumes, which lifts measured line coverage from 55.7% to roughly 82%, then refactor the nine `rust:S3776` cognitive-complexity functions and cover the extracted logic to reach 85%. No spec scenario changes: this is test and code-quality work only.
+Wire the integration test suite into the coverage report Sonar consumes, lifting line coverage from Sonar's 55.7% to 82.46% locally measured. Then refactor the nine `rust:S3776` functions and cover the extracted logic to reach 85% lines; no spec scenario changes, test and code-quality work only.
 
 ## Design
 
@@ -27,7 +25,7 @@ The SonarCloud project `exasol-labs_exapump` was provisioned by PR #36 (commit `
 
 **The observed failure is an empty new-code period, not a threshold breach.** The stored status for that analysis is `NONE` with zero evaluated conditions, and `new_lines`, `new_coverage`, `new_maintainability_rating` and `quality_gate_details` are all empty. Only one analysis exists on `main`, with `projectVersion` reported as `not provided`. The project has no version history, so the new-code baseline resolved to the first analysis itself and left nothing to measure. `sonar.qualitygate.wait=true` treats any status other than `OK` as a failure, so the scanner exited non-zero. The same commit analysed as PR #36 returned `qualityGateStatus: OK`, because a pull-request analysis always has a well-defined new-code period: the PR diff.
 
-**Coverage measurement excludes the entire integration suite.** The `unit-tests` job runs `cargo llvm-cov --bin exapump`, which executes only the `#[cfg(test)]` modules inside `src/`. The 194 tests under `tests/` never contribute. Running the same tool over all test targets locally, with no Exasol container so the Exasol-gated tests fail, already reports 82.46% line coverage against 54.96% for the current command:
+**Coverage measurement excludes the entire integration suite.** The `unit-tests` job runs `cargo llvm-cov --bin exapump`, which executes only the `#[cfg(test)]` modules inside `src/`. The 179 integration tests under `tests/` never contribute. Running the same tool over all test targets locally, with no Exasol container so the Exasol-gated tests fail, already reports 82.46% line coverage against 54.96% for the current command:
 
 | File | `--bin exapump` | all targets | Lines still missed |
 |------|-----------------|-------------|--------------------|
@@ -99,7 +97,7 @@ The coverage signal does not survive intact. Deleting `unit-tests` removes the r
 | Pattern | Where | Why |
 |---------|-------|-----|
 | Extract pure decision function | `profile.rs`, `export.rs`, `sql.rs`, `interactive.rs` | Cuts S3776 complexity and makes the branch logic reachable without a TTY or a database |
-| Dependency inversion on prompting | `profile.rs` `init`, `edit`, `prompt_bucketfs`, `edit_bucketfs` | A `ProfilePrompter` trait replaces every direct `inquire` and `rpassword` call. The caller supplies the implementation, so the whole flow runs under test against canned answers instead of only the extracted helpers |
+| Dependency inversion on prompting | `profile.rs` `init`, `edit`, `prompt_bucketfs`, `edit_bucketfs` | A `ProfilePrompter` trait replaces every `inquire` and `rpassword` call in the `init` and `edit` flows. The caller supplies the implementation, so the whole flow runs under test against canned answers instead of only the extracted helpers |
 | Table-driven rendering | `profile::show` | Replaces a 13-branch print cascade with data plus one loop |
 
 ### Consequences
@@ -132,8 +130,8 @@ One file enters the spec library at record time: `/speq:record` promotes `decisi
 
 | Requirement | Details | Verified |
 |-------------|---------|----------|
-| Overall coverage | `cargo llvm-cov --summary-only` TOTAL line coverage at or above 85% against a running Exasol container. Baseline: task 1.1 records it; 82.46% is the container-free floor | In-loop |
-| `profile.rs` coverage | `cargo llvm-cov --summary-only` reports `commands/profile.rs` at or above 70%. Baseline 38.30% from the same command. If the task 1.1 per-function measurement shows the target is unreachable, the Phase 1 gate below revises this number before Phase 2 starts, and the revised number is the requirement | In-loop |
+| Overall coverage | `cargo llvm-cov --summary-only` TOTAL line coverage at or above 85% of lines against a running Exasol container. Baseline: task 1.1 records it; 82.46% is the container-free floor | In-loop |
+| `profile.rs` coverage | `cargo llvm-cov --summary-only` reports `commands/profile.rs` at or above 70% of lines. Baseline 38.30% from the same command. If the task 1.1b per-function measurement shows the target is unreachable, tasks 1.1c and 1.1d revise this number before Phase 2 starts, and the revised number is the requirement | In-loop |
 | Cognitive complexity | Zero open `rust:S3776` issues. Baseline 9. Every listed function at or below the rule's configured `threshold` parameter. Planning measured that threshold as **15** via `api/rules/show?key=rust:S3776&organization=exasol-labs` (`defaultValue: "15"`, not overridden in the project's Rust `Sonar way` profile `AZ9q0GTXpguOUvh2Rvhk`). Task 1.7 re-confirms it and replaces this number if it has changed | In-loop for the per-function count (task 1.7's manual count method); Operator for the issue total |
 | New-code duplication | `new_duplicated_lines_density` at or below 3 on this plan's PR analysis. This is the gate condition; the extracted functions are the new code it measures, so they must consolidate duplicated blocks rather than copy them | Operator |
 | Overall duplication | Secondary check: `duplicated_lines_density` stays at or below 3%. Baseline 2.1%, concentrated in `interactive.rs` (8.9%), `bucketfs.rs` (7.9%) and `sql.rs` (3.7%) | Operator |
@@ -141,6 +139,10 @@ One file enters the spec library at record time: `/speq:record` promotes `decisi
 | Ratings | `reliability_rating`, `security_rating` and `sqale_rating` stay at A. Bugs, vulnerabilities and security hotspots stay at 0 | Operator |
 | Gate status | `api/qualitygates/project_status` returns `OK` for this plan's PR analysis and for the next `main` analysis, not `NONE` and not `ERROR` | Operator |
 | Behavior | Every existing test under `tests/` passes unchanged. No test is deleted or weakened to accommodate a refactor | In-loop |
+
+**Both coverage rows count test code as source.** `sonar-project.properties` sets `sonar.sources=src`, so a `#[cfg(test)]` module inside `src/` is source that `cargo llvm-cov` reports as covered by definition. A large `ScriptedPrompter` test module therefore lifts both figures without covering one production line. This plan does not exclude those modules from the report. It evaluates both rows over baseline line sets instead. The `profile.rs coverage` row is evaluated over that file's baseline coverable line set alone — the lines task 1.1 records. Every line this plan's new `#[cfg(test)]` module adds is excluded from that row's numerator and from its denominator. The `Overall coverage` row is evaluated the same way, against the task 1.1 baseline `lines_to_cover`. Four measurements bind to those sets: the task 1.1 baseline, the task 1.1b counts, each Phase 2 per-file check, and the task 3.2 re-measurement. Tasks 3.1 and 3.2 also re-run the task 1.1b measurement, which no test line can inflate. Task 3.2's ban on assertion-free tests is what keeps the number honest.
+
+**Both rows are read on the report-side line rule.** `cargo llvm-cov --summary-only` produces both figures. Sonar computes its own coverage from the lcov export, which uses a different line rule: 604 coverable lines for `profile.rs` against the report's 611. The two run about one point apart on that file, so a Sonar percentage is never compared directly against a row here.
 
 The two headline Goals (gate `OK` on the PR analysis and on the following `main` analysis) are Operator criteria by construction. An implementation report may claim only the In-loop rows.
 
@@ -150,6 +152,7 @@ The two headline Goals (gate `OK` on the PR analysis and on the following `main`
 |------------|---------|--------|
 | `cargo-llvm-cov` | Coverage instrumentation | Installed in CI via `taiki-e/install-action@cargo-llvm-cov`; move the step into `integration-tests` |
 | `llvm-tools-preview` | Rust component `cargo-llvm-cov` requires | Add to the `integration-tests` toolchain step |
+| `rustfilt` | Demangles the v0-mangled `FN:` names task 1.1b reads from the lcov file | Absent on this machine; install with `cargo install rustfilt`. Local only, not needed in CI |
 | Exasol `exasol/docker-db:2025.2.0` | Coverage run needs the full suite to pass | Already started by `integration-tests` |
 | SonarCloud `exasol-labs_exapump` | Gate evaluation | Provisioned; `SONAR_TOKEN` present for same-repo runs |
 
@@ -157,16 +160,92 @@ The two headline Goals (gate `OK` on the PR analysis and on the following `main`
 
 ### Phase 1: Record the baseline and fix coverage measurement
 
-- [ ] 1.1 Start `exasol/docker-db:2025.2.0` locally per `CLAUDE.md`, wait with `exapump wait`, then run `cargo llvm-cov --lcov --output-path /tmp/lcov-baseline.info --summary-only` and record the TOTAL and per-file line coverage. This is the true full-suite baseline; the 82.46% figure in Design was measured without a container and is a floor.
-- [ ] 1.1b Against the same container, run `cargo llvm-cov --json --output-path /tmp/cov-baseline.json` and emit a per-function uncovered-line count for `src/commands/profile.rs`, one row per function, sorted descending: `jq -r '.data[0].functions[] | select(.filenames[0] | endswith("commands/profile.rs")) | [(.name), ([.regions[] | select(.[5] == 0)] | length)] | @tsv' /tmp/cov-baseline.json`. Record the table in the implementation notes, then sum the counts for `init`, `edit`, `prompt_bucketfs`, `edit_bucketfs`, `prompt_profile_name`, `prompt_new_password`, `inquire_text`, `inquire_confirm` and `inquire_port` — the functions the task 2.2 design makes reachable. Call that sum R.
+- [ ] 1.1 Start `exasol/docker-db:2025.2.0` locally per `CLAUDE.md`, wait with `exapump wait`, then run the suite once and report from it twice:
 
-**Phase 1 coverage-feasibility gate. Phase 2 must not start until this is answered.** Reaching 70% on `profile.rs` from the 38.30% baseline needs roughly 194 additional covered lines out of its roughly 611 coverable lines, and reaching 85% overall depends on that number. R from task 1.1b is the evidence for it. If R is at or above 194, the § Requirements figures stand unchanged. If R is below 194, recompute both targets from R before any Phase 2 task begins: set the `profile.rs` target to `(coverable - uncovered + R) / coverable` rounded down to the nearest whole percent, set the overall target to the TOTAL that the same R implies rounded down to the nearest whole percent, write both revised numbers into the § Requirements `profile.rs coverage` and `Overall coverage` rows, and amend `decision-log.md` [7] with the measured R and the revised targets. The revised numbers then are the requirement; a 70% target that R contradicts is not carried forward, and no Phase 2 or Phase 3 task may be marked done against an unrevised target.
+  ```sh
+  cargo llvm-cov --no-report
+  cargo llvm-cov report --summary-only
+  cargo llvm-cov report --lcov --output-path /tmp/lcov-baseline.info
+  ```
+
+  Record the TOTAL and per-file line coverage from the `--summary-only` table. This is the true full-suite baseline; the 82.46% figure in Design was measured without a container and is a floor. Record `commands/profile.rs` coverable and uncovered line counts separately: tasks 1.1c and 1.1d name them as the baseline `coverable` and `uncovered`.
+
+  `--summary-only` MUST NOT be combined with `--lcov`. That combination strips every `FN:` and `DA:` record from the file and leaves only `LF`/`LH` totals, and task 1.1b needs both record types. Verified on `cargo-llvm-cov` 0.8.7.
+
+  Produce no JSON export. Task 1.1b reads the lcov file alone, and a JSON export sitting beside it only invites the cross-format comparison task 1.1b forbids.
+- [ ] 1.1b Emit a per-function **uncovered source line** count for `src/commands/profile.rs` from the `/tmp/lcov-baseline.info` that task 1.1 wrote, one row per function, sorted descending. Task 1.1b-ii turns this table into R. R is a count of uncovered source lines. That is the same unit as the 194 lines task 1.1c compares it against and as the `(coverable - uncovered + R) / coverable` formula in task 1.1d. Do not count regions: `llvm-cov` emits several regions per line, so a region count overstates the figure by a large and variable factor and cannot be compared against 194. [expert]
+
+  Read the counts from the lcov file, not from the JSON export's `files[].segments`. Inside the `SF:` block whose path ends `commands/profile.rs`, every `DA:<line>,<hits>` record is one measured line under llvm-cov's own line rule, and every `FN:<line>,<mangled-name>` record gives one function's start line. Bucket each `DA` line into the function whose `FN` start line is the greatest start line at or below it. This reuses llvm-cov's line mapping and reimplements nothing.
+
+  ```python
+  # python3 - /tmp/lcov-baseline.info
+  import bisect, sys
+  block, keep = [], False
+  for ln in open(sys.argv[1]).read().splitlines():
+      if ln.startswith("SF:"):
+          keep, block = ln[3:].endswith("commands/profile.rs"), []
+      elif ln == "end_of_record":
+          if keep:
+              break
+      elif keep:
+          block.append(ln)
+  fns = sorted((int(l[3:].split(",", 1)[0]), l[3:].split(",", 1)[1]) for l in block if l.startswith("FN:"))
+  da = [tuple(int(v) for v in l[3:].split(",")[:2]) for l in block if l.startswith("DA:")]
+  lf = int(next(l[3:] for l in block if l.startswith("LF:")))
+  lh = int(next(l[3:] for l in block if l.startswith("LH:")))
+  assert len(da) == lf, f"DA records {len(da)} != LF {lf}"
+  assert sum(1 for _, h in da if h == 0) == lf - lh, "zero-hit DA count != LF - LH"
+  starts = [s for s, _ in fns]
+  rows = {}
+  for line, hits in da:
+      i = bisect.bisect_right(starts, line) - 1
+      if i < 0:
+          continue
+      r = rows.setdefault(fns[i][1], [0, 0, starts[i]])
+      r[1] += 1
+      if hits == 0:
+          r[0] += 1
+  for name, (unc, total, start) in sorted(rows.items(), key=lambda kv: -kv[1][0]):
+      print(f"{unc:5d} uncovered /{total:5d} measured  @{start}  {name}")
+  ```
+
+  Self-check, internal to the lcov file and to nothing else: the count of zero-hit `DA` records in that `SF:` block MUST equal `LF - LH` for the same block, and the `DA` record count MUST equal `LF`. Both are the two `assert` lines above. A failure means the file was parsed wrong, not that llvm-cov is wrong.
+
+  **Never compare an lcov figure against a JSON-export figure.** `summary.lines.count` in the JSON export uses a different line rule from the lcov export: 611 lines for `profile.rs` against lcov's 604, on `cargo-llvm-cov` 0.8.7. The two disagree by construction on almost every file, so a mismatch between them proves nothing.
+
+  Eyeball check only, not a gate and not a completion criterion: `cargo llvm-cov report --html --output-dir /tmp/cov-baseline-html` renders `src/commands/profile.rs` with a hit count beside every line. It renders the report-side rule, so its per-function counts do not match this table exactly and are not required to.
+
+  `FN:` names are v0-mangled (`_RNvCs..._7exapump...`), not `init`. Demangle with `rustfilt` and match the final `::` component exactly, or match the length-prefixed trailing component; a substring match on `edit` also matches `edit_bucketfs`. A closure carries its own `FN` record, so its lines bucket to the closure rather than to the function around it. Fold each closure row into the function whose line range encloses the closure's printed start line.
+
+  Record the table in the implementation notes.
+- [ ] 1.1b-ii Sum the task 1.1b table into R. Add the counts for `init`, `edit`, `prompt_bucketfs`, `edit_bucketfs`, `prompt_profile_name`, `prompt_new_password`, `inquire_text`, `inquire_confirm` and `inquire_port` — the functions the task 2.2 design makes reachable. [expert]
+
+  **Then subtract from R every line task 2.2 relocates into `TerminalPrompter`.** Those lines move to the production implementation and stay uncovered there, so they are not coverage this design yields: the `inquire_text` body (`profile.rs:484-496`), the `inquire_confirm` body (`:497-503`), `map_inquire_err` (`:626-635`), and the raw `inquire::Text` call bodies inside `inquire_port` (`:506-509`), `prompt_bucketfs` (`:581-584`, `:590-593`) and `edit_bucketfs` (`:849-852`, `:862-865`). Subtract them by hand from the per-function counts, counting only lines that carry a `DA` record. R counts only the branching and validation lines that remain in the trait-taking functions.
+
+  Record R and the nine per-function counts it was summed from in the implementation notes. Tasks 3.1 and 3.2 re-run this measurement and compare against those nine counts.
+- [ ] 1.1c Compare R against 194 lines. That is the number of additional covered lines the § Requirements `profile.rs coverage` row's 70% target needs from the 38.30% baseline over roughly 611 coverable lines (`611 * (0.70 - 0.383) = 194`), and the overall 85% target depends on it. If R is at or above 194 lines, record `targets stand, R = <n> lines` in the implementation notes; the § Requirements figures stand unchanged and task 1.1d is skipped. If R is below 194 lines, record `targets revised, R = <n> lines` and do task 1.1d.
+- [ ] 1.1d Conditional on R below 194 lines; skip it when task 1.1c recorded `targets stand`. Recompute both targets from the measured R, in line units throughout: set the `profile.rs` target to `(coverable - uncovered + R) / coverable` rounded down to the nearest whole percent, and set the overall target to the TOTAL that the same R implies against `lines_to_cover`, also rounded down to the nearest whole percent.
+
+  `coverable` and `uncovered` in that formula are the task 1.1 baseline values for `src/commands/profile.rs`, and `lines_to_cover` is the task 1.1 baseline total. They are never re-measured after this plan's `#[cfg(test)]` module exists. The achieved figure that tasks 3.1 and 3.2 check is computed on that same baseline denominator, so a test module cannot move either side of the comparison. Rewrite the § Requirements `profile.rs coverage` and `Overall coverage` rows with the two revised figures, append the measured R and both revised figures to `decision-log.md` [7] § Gate, and record the revision in the implementation notes. The revised numbers are then the requirement: a 70% target that R contradicts is not carried forward, and it is not closed with assertion-free tests. No Phase 2 or Phase 3 task may be marked done against an unrevised target.
 - [ ] 1.2 In `.github/workflows/ci.yml`, add `with: components: llvm-tools-preview` to the `integration-tests` toolchain step and add the `taiki-e/install-action@cargo-llvm-cov` step after it.
 - [ ] 1.3 In the `integration-tests` job, replace `run: cargo test --verbose` with `run: cargo llvm-cov --lcov --output-path lcov.info`, keeping `env: REQUIRE_EXASOL: "1"`. Add the `actions/upload-artifact@v4` step for `lcov.info` (name `lcov`, `if-no-files-found: error`) after the test step and before the container teardown steps.
 - [ ] 1.4 Delete the `unit-tests` job and change the `sonar` job's `needs: [unit-tests]` to `needs: [integration-tests]`.
 - [ ] 1.5 In the `sonar` job, add a step that reads the crate version from `Cargo.toml` into a step output, then pass `args: -Dsonar.projectVersion=<version>` to `SonarSource/sonarqube-scan-action@v8.2.1`.
 - [ ] 1.6 Update the comment above `sonar.rust.lcov.reportPaths` in `sonar-project.properties`: the report now covers the full suite, not unit tests.
-- [ ] 1.7 Run `curl -s "https://sonarcloud.io/api/rules/show?key=rust:S3776&organization=exasol-labs"` and read the `threshold` parameter, then run `curl -s "https://sonarcloud.io/api/rules/search?organization=exasol-labs&qprofile=AZ9q0GTXpguOUvh2Rvhk&activation=true&rule_key=rust:S3776&f=params"` to confirm the project's Rust `Sonar way` profile does not override it. Write the value into the § Requirements `Cognitive complexity` row. Planning measured 15; if the value differs, that value replaces 15 everywhere in Phase 2 and the Phase 2 tasks target the new number. Record the counting method for local use in the implementation notes: SonarSource cognitive complexity adds 1 for each `if`, `else if`, `match`, `loop`, `while`, `for`, `catch`-equivalent (`?` does not count), and each `&&`/`||` sequence; adds the current nesting depth as an extra increment for each of those that is nested inside another; and adds 1 per `break`/`continue` with a label. Nesting depth counts only structures that increment.
+- [ ] 1.7 Run `curl -s "https://sonarcloud.io/api/rules/show?key=rust:S3776&organization=exasol-labs"` and read the `threshold` parameter, then run `curl -s "https://sonarcloud.io/api/rules/search?organization=exasol-labs&qprofile=AZ9q0GTXpguOUvh2Rvhk&activation=true&rule_key=rust:S3776&f=params"` to confirm the project's Rust `Sonar way` profile does not override it. Write the value into the § Requirements `Cognitive complexity` row. Planning measured 15; if the value differs, that value replaces 15 everywhere in Phase 2 and the Phase 2 tasks target the new number. Record this counting method verbatim in the implementation notes; it is the only in-loop check on all seven Phase 2 tasks, and undercounting lets a task be marked done while Sonar still scores the function above the threshold.
+
+  1. **Base increment, +1 each:** `if`, `else if`, **`else`**, `match`, `loop`, `while`, `for`, and each sequence of `&&`/`||` operators (one increment per sequence of the same operator, not per operator). `?` does not count.
+  2. **Recursion, +1** per recursive call cycle.
+  3. **Labeled jumps, +1** per `break` or `continue` that carries a label.
+  4. **Nesting increment:** add the current nesting level as an extra increment, and add it **only** to `if`, `match`, `loop`, `while`, `for` and closure bodies. Never add it to `else`, to `else if`, to a boolean-operator sequence, or to a labeled jump — those take their flat +1 wherever they sit.
+  5. **Nesting level** starts at 0 and is raised by one inside the body of an `if`, an `else`, a `match`, a loop, or a closure.
+
+  **Calibration, mandatory before any Phase 2 counting.** Hand-count these two functions with the method above and reproduce both numbers, which are SonarCloud's own scores for this codebase and match the § Design/Context table:
+
+  - `profile::show` (`profile.rs:220`) must count to **19**: one `match` at level 0 (+1), nine `if let`/`if` at level 1 (+2 each, 18). It contains no `else`.
+  - `profile::init` (`profile.rs:370`) must count to **22**: eight `if` (seven at level 0 and one nested, 9), five `match` at level 0 (5), five bare `else` at `:418`, `:429`, `:443`, `:456` and `:477` (+1 each with no nesting increment, 5), one `||` sequence (+1, no nesting increment), one `for` nested inside an `if` (+2). `:456` is an inline `else` inside the `Profile` struct literal — `default: if make_default { Some(true) } else { None },` — so a scan for block-shaped `else` keywords misses it and lands on 21.
+
+  A method that fails either calibration is wrong. Correct it and re-run both before counting any refactored function, and do not mark a Phase 2 task done against a count produced by an uncalibrated method.
 
 ### Phase 2: Cut cognitive complexity and expose the logic to tests
 
@@ -174,7 +253,7 @@ Each task drives the named function to cognitive complexity at or below the task
 
 **Local verification, per task, before the task is marked done.** Both steps run without SonarCloud:
 
-1. Count cognitive complexity by hand for the refactored function and for every function extracted from it, applying the counting method task 1.7 recorded. Write the count for each function into the implementation notes next to its name. A function above the threshold fails the task.
+1. Count cognitive complexity by hand for the refactored function and for every function extracted from it, applying the counting method task 1.7 recorded. Reproduce task 1.7's two calibration counts (`profile::show` = 19, `profile::init` = 22) before counting anything in this phase; a method that misses either number undercounts and must be corrected first. Write the count for each function into the implementation notes next to its name. A function above the threshold fails the task.
 2. Run `cargo llvm-cov --summary-only` and read the line-coverage figure for the file the task touched. It must not fall below the figure task 1.1 recorded for that file.
 
 The Sonar issue total is not verifiable in-loop and is not a completion criterion for any Phase 2 task; it is checked in the Post-Merge Operator Checklist, which also defines the remediation loop when it is above zero.
@@ -191,9 +270,19 @@ The Sonar issue total is not verifiable in-loop and is not a completion criterio
   }
   ```
 
-  `text` renders `"{label}:"` and applies the `required` empty-check, reproducing today's `inquire_text` exactly; the raw `inquire::Text` calls in `inquire_port`, `prompt_bucketfs` and `edit_bucketfs` become `text` calls with the same rendered label and `required: false`. `password` wraps `rpassword::prompt_password` and takes the full prompt string. `notice` carries the retry feedback that is `println!` today (`"  not a valid port — enter 1..65535"`, `"  passwords did not match — try again"`, `"  '{}' already exists — choose another name"`), so the retry loops in `inquire_port`, `prompt_profile_name` and `prompt_new_password` become testable.
+  `text` renders `"{label}:"` and applies the `required` empty-check, reproducing today's `inquire_text` exactly; the raw `inquire::Text` calls in `inquire_port`, `prompt_bucketfs` and `edit_bucketfs` become `text` calls with the same rendered label and `required: false`. Label rendering and the `required` empty-check with its `"{} is required"` failure live in exactly one place — either a default method on `ProfilePrompter` that both implementations inherit, or a free function both call. Each trait method implementation then carries only the prompting itself, so `ScriptedPrompter` cannot diverge from `TerminalPrompter` on a label or on the empty-check.
 
-  Change `init`, `edit`, `prompt_bucketfs`, `edit_bucketfs`, `prompt_profile_name`, `prompt_new_password`, `inquire_port`, `inquire_text` and `inquire_confirm` to take `&mut dyn ProfilePrompter`. Ship one production implementation, `TerminalPrompter`, holding the current `inquire`/`rpassword` bodies and the `map_inquire_err` mapping. Construct it, and keep the `!stdin().is_terminal()` guard with its unchanged error message, in a thin outer `init`/`edit` wrapper that also does `config::load_config` and `config::save_config`; the wrapper is the only part that stays uncovered. Consolidate the near-duplicate BucketFS prompt logic shared by `prompt_bucketfs` and `edit_bucketfs` into one function over the trait.
+  `password` wraps `rpassword::prompt_password` and takes the full prompt string. `notice` carries the retry feedback that is `println!` today. All five messages move to `notice`, so the retry loops in `inquire_port`, `prompt_profile_name` and `prompt_new_password` become testable: `"  not a valid port — enter 1..65535"` (`profile.rs:512`, and the same string again at `:709` inside `edit`'s own port loop), `"  '{}' already exists — choose another name"` (`:528`), the `config::validate_profile_name` error passthrough `"  {}"` (`:533`), `"  password cannot be empty"` (`:542`), and `"  passwords did not match — try again"` (`:549`). Leaving any of them as a bare `println!` leaves its branch unassertable.
+
+  Three other `println!` calls stay bare `println!` and do **not** route through `notice`: `"Profile '{}' created{}"` (`profile.rs:480`), `"Editing profile '{}' — press Enter to keep current value."` (`:695`) and `"Profile '{}' updated{}"` (`:804`). They are terminal status output, not retry feedback, and routing them through `notice` would put status text into the recorded label sequence the tests assert on. The `make_default` tests therefore assert the `default` field of the `Profile` the inner function returns to its wrapper, not the printed suffix. That return value is what the wrapper hands to `config::save_config`, so it is already on the seam.
+
+  Change `init`, `edit`, `prompt_bucketfs`, `edit_bucketfs`, `prompt_profile_name`, `prompt_new_password`, `inquire_port`, `inquire_text` and `inquire_confirm` to take `&mut dyn ProfilePrompter`. Ship one production implementation, `TerminalPrompter`, holding the current `inquire`/`rpassword` bodies and the `map_inquire_err` mapping. Construct it, and keep the `!stdin().is_terminal()` guard with its unchanged error message, in a thin outer `init`/`edit` wrapper that also does `config::load_config` and `config::save_config`; the wrapper is the only part that stays uncovered.
+
+  `remove` (`profile.rs:652`) and `prompt_password_for` (`:636`) do **not** convert to `&mut dyn ProfilePrompter` in this plan. Both hold direct calls (`inquire::Confirm` at `:665`, `rpassword::prompt_password` at `:645`) and both carry their own `is_terminal` guard, but neither is part of the `init`/`edit` flow this trait targets, so both stay as they are and neither contributes to R.
+
+  Do not merge `prompt_bucketfs` (`profile.rs:554`) and `edit_bucketfs` (`:809`) into one function. They diverge on four axes — opening prompt (`"Configure BucketFS? (needed for \`exapump bucketfs\` commands)"` versus `"Edit BucketFS settings?"`), decline behavior (all-`None` versus the current values), defaults (`Some("")`, `DEFAULT_BFS_PORT`, `"default"` versus the profile's current values), and password prompt wording — and decision [8] plus § Verification/Manual Testing require all four to survive byte-identical. One function carrying four mode flags is a shallower abstraction than the two it replaces. Extract only what is genuinely shared: the port parse-and-validate step and the blank-to-`None` mapping, as helpers over the trait. `prompt_bucketfs` and `edit_bucketfs` stay separate callers owning their own prompt strings, defaults and decline behavior.
+
+  **The shared port helper is the parse-and-validate step alone, and it does not retry.** Each caller keeps its own failure behavior. `prompt_bucketfs` (`profile.rs:585-588`) and `edit_bucketfs` (`:853-856`) KEEP their current hard failure, `anyhow::bail!("invalid BucketFS port: {}", port_raw)`, with no retry and no `notice`. The retry-with-`notice` loops belong only to `inquire_port` (`:504-515`) and to `edit`'s own port loop (`:702-711`), neither of which is BucketFS. Turning either BucketFS bail into a re-prompt is a user-visible CLI behavior change, which § Non-Goals and `decision-log.md` [8] both forbid, and no test under `tests/` would catch it. `ScriptedPrompter` tests MUST assert the recorded label sequence for both flows; `grep -n "blank to skip\|blank = clear\|Configure BucketFS\|Edit BucketFS" tests/profile_test.rs` returns nothing today, so no existing test would catch a prompt-string regression.
 
   Unit-test with a test-only `ScriptedPrompter` that answers from a queue and records the labels it was asked, covering: `init` with and without each `args` field pre-supplied, `make_default` both ways including the default-clearing loop, `--no-bucketfs`, the BucketFS blank-to-skip paths, `edit`'s keep-current-value paths, its change-password and blank-to-clear password paths, and the port and profile-name retry loops. Assert on the recorded labels so the prompt sequence stays byte-identical. Do not add a public API: `ProfilePrompter` and both implementations stay private to the module. [expert]
 - [ ] 2.3 `src/commands/sql.rs:13` `strip_comments` (35) and `:80` `split_statements` (60): reduce both scanners below 15 without changing their output for any input. Both are hand-written state machines over quoting, line and block comments, and the `CREATE ... SCRIPT ... AS` header that switches to script-body scanning. Extract the per-state transition handling; do not rewrite the algorithm. The existing 78 unit tests in this file are the correctness net; add cases for any branch the extraction leaves uncovered. [expert]
@@ -204,8 +293,12 @@ The Sonar issue total is not verifiable in-loop and is not a completion criterio
 
 ### Phase 3: Close the remaining coverage gaps
 
-- [ ] 3.1 Raise `src/commands/profile.rs` to the § Requirements `profile.rs coverage` figure (70%, or the figure the Phase 1 gate substituted) by unit-testing through the `ProfilePrompter` seam task 2.2 introduced, targeting the 377 lines currently unreachable through `assert_cmd`.
-- [ ] 3.2 Re-measure with `cargo llvm-cov --summary-only`. If TOTAL is below the § Requirements `Overall coverage` figure (85%, or the figure the Phase 1 gate substituted), add tests for the next-largest gaps in order: `sql.rs` (96 lines), `interactive.rs` (69), `bucketfs.rs` (44), `export.rs` (28), `wait.rs` (27), `split.rs` (25). Stop at 85%; do not write tests that assert nothing in order to move the number.
+- [ ] 3.1 Raise `src/commands/profile.rs` to the § Requirements `profile.rs coverage` figure (70% of lines, or the figure task 1.1d substituted) by unit-testing through the `ProfilePrompter` seam task 2.2 introduced, targeting the 377 lines currently unreachable through `assert_cmd`.
+
+  **The file percentage alone does not complete this task.** Re-run the task 1.1b measurement against a fresh `cargo llvm-cov report --lcov` and sum the uncovered-line counts over the same nine functions task 1.1b-ii summed R from. That sum MUST have fallen by at least the R task 1.1c or task 1.1d recorded. Record the task 1.1b-ii baseline sum and the achieved sum in the implementation notes. Lines added by the new `#[cfg(test)]` module bucket to their own `FN` records, so they cannot move this number.
+- [ ] 3.2 Re-measure with `cargo llvm-cov --summary-only`. If TOTAL is below the § Requirements `Overall coverage` figure (85% of lines, or the figure task 1.1d substituted), add tests for the next-largest gaps in order: `sql.rs` (96 lines), `interactive.rs` (69), `bucketfs.rs` (44), `export.rs` (28), `wait.rs` (27), `split.rs` (25). Stop at 85%; do not write tests that assert nothing in order to move the number.
+
+  Repeat task 3.1's uninflatable check as the final gate: re-run the task 1.1b measurement, sum the uncovered-line counts over the same nine functions, and require that sum to sit at least R below the task 1.1b-ii baseline sum. Record both counts in the implementation notes. A TOTAL that reaches the § Requirements figure while this sum has not fallen by R means test-module lines carried it, and the plan's targets are not met.
 
 ### Phase 4: Verify the gate
 
@@ -227,7 +320,7 @@ Remediation when that total is above zero: read each remaining issue's `componen
 
 | Parallel Group | Tasks |
 |----------------|-------|
-| Group A | 1.1, 1.1b (1.1 before 1.1b — same container, same run), 1.7 |
+| Group A | 1.1, 1.1b, 1.1b-ii, 1.1c, 1.1d (strictly in order — 1.1 is the only container run and writes both report files, 1.1b reads its lcov file, 1.1b-ii sums R, 1.1c reads R, 1.1d runs only if 1.1c says so), 1.7 |
 | Group B | 1.2 to 1.5 (all edit `.github/workflows/ci.yml`, so run them in order), 1.6 |
 | Group C1 | 2.1 + 2.2 + 3.1 (`profile.rs`), 2.3 + 2.4 (`sql.rs`), 2.7 (`export.rs`) |
 | Group C2 | 2.5 + 2.6 (`interactive.rs`) |
@@ -235,7 +328,8 @@ Remediation when that total is above zero: read each remaining issue's `componen
 
 Sequential dependencies:
 
-- Group A to Group B: the baseline must be recorded before the CI change alters what gets measured, and the Phase 1 coverage-feasibility gate must be answered before any Phase 2 work starts.
+- Group A to Group B: the baseline must be recorded before the CI change alters what gets measured.
+- **Group A to Group C1: Phase 2 may not begin until task 1.1c or task 1.1d is checked off.** One of the two always applies: 1.1c when R is at or above 194 lines, 1.1d when it is below. Until one carries a check, no Phase 2 or Phase 3 task may start and none may be marked done, because the coverage target it would be measured against is unconfirmed.
 - Group B to Group C1: refactored lines count as new code, so the corrected coverage pipeline must exist before the refactors land.
 - **Group C1 to Group C2: `interactive.rs` depends on `sql.rs`.** `src/commands/interactive.rs:7` imports `error_hint`, `split_statements`, `write_csv` and `write_json` from `sql.rs`, and tasks 2.3 and 2.4 change exactly those. Running the two files' lanes concurrently produces either a broken build or one lane silently reverting the other's signature change, which the "no test may be edited" rule makes expensive to resolve. Task 2.4 lands the `write_csv`/`write_json` signature change together with the `interactive.rs` call-site updates; tasks 2.5 and 2.6 then start from a building tree and change nothing in `sql.rs`.
 - Group C2 to Group D: the final measurement and local checklist need every refactor and its tests in place.
@@ -284,6 +378,6 @@ New unit tests added by this plan cover extracted pure functions, which is the c
 | Lint | `cargo clippy --all-targets --all-features -- -D warnings` | 0 errors, 0 warnings |
 | Format | `cargo fmt --all -- --check` | No changes |
 | Licenses | `cargo deny check licenses && cargo deny check advisories` | Pass |
-| Coverage | `cargo llvm-cov --lcov --output-path lcov.info --summary-only` with Exasol running | TOTAL at or above the § Requirements `Overall coverage` figure |
+| Coverage | `cargo llvm-cov --summary-only` with Exasol running | TOTAL at or above the § Requirements `Overall coverage` figure |
 | Cognitive complexity | Hand count per the task 1.7 method for every function Phase 2 refactored or extracted, read back from the implementation notes | Every function at or below the task 1.7 threshold; a count is recorded for each |
 | Full gate | `./scripts/check.sh` | Exit 0 |
