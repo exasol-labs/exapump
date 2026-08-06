@@ -1249,3 +1249,140 @@ fn export_parquet_output_not_writable() {
         .assert()
         .failure();
 }
+
+// --- CSV export timeout integration tests ---
+
+/// A row generator whose CSV export runs far longer than the one-second bound
+/// the timeout tests impose: 7000 x 7000 rows take about ten seconds to reach
+/// the client, where the 3000 x 3000 first tried finished inside the bound.
+const SLOW_EXPORT_QUERY: &str = "SELECT t1.n * t2.n AS v \
+     FROM (SELECT LEVEL AS n FROM DUAL CONNECT BY LEVEL <= 7000) t1, \
+     (SELECT LEVEL AS n FROM DUAL CONNECT BY LEVEL <= 7000) t2";
+
+#[test]
+fn export_with_generous_timeout_succeeds() {
+    fixtures::require_exasol!();
+    let schema = setup_schema("exp_tmo_ok");
+    setup_table(&schema, "test_data");
+
+    let dir = tempfile::tempdir().unwrap();
+    let output = dir.path().join("data.csv");
+
+    fixtures::exapump()
+        .env("EXAPUMP_DSN", fixtures::DOCKER_DSN)
+        .args([
+            "export",
+            "--table",
+            &format!("{schema}.test_data"),
+            "--output",
+            output.to_str().unwrap(),
+            "--format",
+            "csv",
+            "--timeout",
+            "300",
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Exported 4 rows"));
+
+    let content = std::fs::read_to_string(&output).unwrap();
+    assert!(content.contains("Alice"));
+    assert!(content.contains("Bob"));
+    assert!(content.contains("Charlie"));
+
+    teardown_schema(&schema);
+}
+
+#[test]
+fn export_exceeding_timeout_fails() {
+    fixtures::require_exasol!();
+    let schema = setup_schema("exp_tmo_over");
+
+    let dir = tempfile::tempdir().unwrap();
+    let output = dir.path().join("data.csv");
+
+    fixtures::exapump()
+        .timeout(std::time::Duration::from_secs(60))
+        .env("EXAPUMP_DSN", fixtures::DOCKER_DSN)
+        .args([
+            "export",
+            "--query",
+            SLOW_EXPORT_QUERY,
+            "--output",
+            output.to_str().unwrap(),
+            "--format",
+            "csv",
+            "--timeout",
+            "1",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("timed out after 1000ms"))
+        .stderr(predicate::str::contains(format!(
+            "Removed partial output: {}",
+            output.display()
+        )));
+
+    assert!(
+        !output.exists(),
+        "the timed-out export left {} on disk",
+        output.display()
+    );
+
+    // Tearing the schema down doubles as the check that the aborted export
+    // left the database usable.
+    teardown_schema(&schema);
+}
+
+#[test]
+fn export_split_exceeding_timeout_fails() {
+    fixtures::require_exasol!();
+    let schema = setup_schema("exp_tmo_split");
+
+    let dir = tempfile::tempdir().unwrap();
+    let output = dir.path().join("data.csv");
+    let foreign = "not written by the export\n";
+    std::fs::write(&output, foreign).unwrap();
+
+    fixtures::exapump()
+        .timeout(std::time::Duration::from_secs(60))
+        .env("EXAPUMP_DSN", fixtures::DOCKER_DSN)
+        .args([
+            "export",
+            "--query",
+            SLOW_EXPORT_QUERY,
+            "--output",
+            output.to_str().unwrap(),
+            "--format",
+            "csv",
+            "--max-rows-per-file",
+            "1000",
+            "--timeout",
+            "1",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("timed out after 1000ms"));
+
+    // exarrow-rs buffers the whole CSV before writing a byte, so the deadline
+    // always elapses before the first split file is opened: there is never a
+    // data_NNN.csv for the cleanup to remove or to name on stderr. The
+    // surviving data.csv is what proves it spared a file it did not create.
+    let survivors: Vec<String> = std::fs::read_dir(dir.path())
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|name| name.starts_with("data_"))
+        .collect();
+    assert!(
+        survivors.is_empty(),
+        "the timed-out split export left {survivors:?} on disk"
+    );
+
+    assert_eq!(
+        std::fs::read_to_string(&output).unwrap(),
+        foreign,
+        "the split export removed or rewrote a data.csv it never created"
+    );
+
+    teardown_schema(&schema);
+}

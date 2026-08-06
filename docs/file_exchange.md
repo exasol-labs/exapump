@@ -57,15 +57,23 @@ exapump export --query 'SELECT * FROM t WHERE id > 100' --output result.parquet 
 | `--quote` | `"` | CSV quoting character |
 | `--no-header` | — | Exclude header row from output |
 | `--null-value` | `""` | String to represent NULL values |
+| `--timeout` | — | Client-side export deadline in seconds; CSV only |
 | `--compression` | — | Compression codec for Parquet: `snappy`, `gzip`, `lz4`, `zstd`, `none` |
 | `--max-rows-per-file` | — | Maximum rows per output file (enables splitting) |
 | `--max-file-size` | — | Maximum file size per output file, e.g. `500KB`, `1MB`, `2GB` (enables splitting) |
+
+Three different timeouts can bound a CSV export, and only one of them is the flag above. `--timeout` sets a client-side export deadline, in seconds, for CSV exports only. `?query_timeout=<seconds>` in the DSN sets a server-enforced query bound that applies to every format. `?timeout=<seconds>` in the DSN sets only the connection's connect deadline; it does not bound an export. If `--timeout` elapses, exapump deletes the output files the export had written. On a split CSV export (`--max-rows-per-file` or `--max-file-size`), `--timeout` bounds only the download phase; the file-writing phase that follows runs unbounded. The single-file path stays bounded through both phases.
+
+A Parquet export has no client-side deadline and cannot take one; `--timeout` is rejected for `--format parquet`. exapump versions before 0.12.0 bounded it implicitly at 300 seconds, whether or not it was split. `?query_timeout=<seconds>` in the DSN is the only bound available for a Parquet export.
 
 ### Examples
 
 ```bash
 # Export a table to CSV
 exapump export --table my_schema.events --output events.csv --format csv
+
+# Export a CSV with a 300-second client-side deadline
+exapump export --table my_schema.events --output events.csv --format csv --timeout 300
 
 # Export a query result to compressed Parquet
 exapump export --query 'SELECT * FROM t' --output out.parquet --format parquet --compression zstd

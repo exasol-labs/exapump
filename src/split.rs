@@ -38,6 +38,27 @@ pub fn rename_single_split(base: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Delete one partial export output, returning the path if it was removed.
+///
+/// Sole owner of exapump's partial-output removal policy, so the single-file
+/// and split export paths cannot drift apart: an already-absent file counts as
+/// nothing removed rather than a failure, and a removal that fails warns on
+/// stderr and yields `None` instead of propagating, letting a caller finish
+/// removing the outputs it still has.
+pub fn remove_partial_output(path: &Path) -> Option<PathBuf> {
+    match std::fs::remove_file(path) {
+        Ok(()) => Some(path.to_path_buf()),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => None,
+        Err(err) => {
+            eprintln!(
+                "Warning: failed to remove partial output {}: {err}",
+                path.display()
+            );
+            None
+        }
+    }
+}
+
 const LINE_BUFFER_CAPACITY: usize = 8192;
 
 /// A splitting CSV writer that implements `tokio::io::AsyncWrite`.
@@ -60,6 +81,7 @@ pub struct SplitCsvWriter {
     in_quotes: bool,
 
     current_file: Option<BufWriter<File>>,
+    created: Vec<PathBuf>,
     file_index: u32,
     rows_in_file: u64,
     bytes_in_file: u64,
@@ -92,6 +114,7 @@ impl SplitCsvWriter {
             line_buffer: Vec::with_capacity(LINE_BUFFER_CAPACITY),
             in_quotes: false,
             current_file: None,
+            created: Vec::new(),
             file_index: 0,
             rows_in_file: 0,
             bytes_in_file: 0,
@@ -125,10 +148,31 @@ impl SplitCsvWriter {
         Ok((self.total_rows, num_files))
     }
 
+    /// Close the writer and delete the split files it created, returning the
+    /// paths actually removed so the caller can report them.
+    ///
+    /// Only files this writer opened are touched, so a same-named file it never
+    /// created survives. A removal that fails warns on stderr and is left out of
+    /// the returned paths rather than aborting the remaining removals.
+    ///
+    /// The writer is spent after this call: neither `finish` nor any further
+    /// write may follow it. Returning an empty vector is a normal outcome, not
+    /// a failure — it means the abort happened before the first split file was
+    /// opened.
+    pub fn discard(&mut self) -> Vec<PathBuf> {
+        self.current_file = None;
+
+        std::mem::take(&mut self.created)
+            .into_iter()
+            .filter_map(|path| remove_partial_output(&path))
+            .collect()
+    }
+
     /// Open a new split file at the current `file_index`.
     fn open_next_file(&mut self) -> io::Result<()> {
         let path = split_path(&self.base_path, self.file_index);
         let file = File::create(&path)?;
+        self.created.push(path);
         let mut writer = BufWriter::new(file);
 
         if let Some(ref hdr) = self.header {
@@ -317,6 +361,28 @@ mod tests {
         rename_single_split(&base).unwrap();
     }
 
+    #[test]
+    fn remove_partial_output_deletes_the_file_and_names_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("data.csv");
+        std::fs::write(&path, b"partial\n").unwrap();
+
+        let removed = remove_partial_output(&path);
+
+        assert_eq!(removed, Some(path.clone()));
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn remove_partial_output_names_nothing_when_the_file_is_absent() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("data.csv");
+
+        let removed = remove_partial_output(&path);
+
+        assert_eq!(removed, None, "expected no removal, got {removed:?}");
+    }
+
     // --- SplitCsvWriter tests ---
 
     #[tokio::test]
@@ -469,5 +535,69 @@ mod tests {
         for i in 0..num_files {
             assert!(split_path(&base, i).exists(), "Expected file {i} to exist");
         }
+    }
+
+    #[test]
+    fn discard_removes_nothing_when_no_file_was_opened() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().join("data.csv");
+        let mut writer = SplitCsvWriter::new(base.clone(), Some(3), None, true);
+
+        let removed = writer.discard();
+
+        assert!(removed.is_empty(), "expected no removals, got {removed:?}");
+        assert!(!split_path(&base, 0).exists());
+    }
+
+    #[tokio::test]
+    async fn discard_removes_the_one_file_it_opened() {
+        use tokio::io::AsyncWriteExt;
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().join("data.csv");
+        let mut writer = SplitCsvWriter::new(base.clone(), Some(100), None, true);
+        writer.write_all(b"id\n1\n2\n").await.unwrap();
+        assert!(split_path(&base, 0).exists());
+
+        let removed = writer.discard();
+
+        assert_eq!(removed, vec![split_path(&base, 0)]);
+        assert!(!split_path(&base, 0).exists());
+    }
+
+    #[tokio::test]
+    async fn discard_removes_every_file_it_opened() {
+        use tokio::io::AsyncWriteExt;
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().join("data.csv");
+        let mut writer = SplitCsvWriter::new(base.clone(), Some(1), None, true);
+        writer.write_all(b"id\n1\n2\n3\n").await.unwrap();
+
+        let removed = writer.discard();
+
+        assert_eq!(
+            removed,
+            vec![
+                split_path(&base, 0),
+                split_path(&base, 1),
+                split_path(&base, 2),
+            ]
+        );
+        for index in 0..3 {
+            assert!(!split_path(&base, index).exists(), "file {index} survived");
+        }
+    }
+
+    #[test]
+    fn discard_leaves_a_same_named_file_it_never_opened() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().join("data.csv");
+        let foreign = split_path(&base, 0);
+        std::fs::write(&foreign, b"not ours\n").unwrap();
+        let mut writer = SplitCsvWriter::new(base.clone(), Some(3), None, true);
+
+        let removed = writer.discard();
+
+        assert!(removed.is_empty(), "expected no removals, got {removed:?}");
+        assert_eq!(std::fs::read(&foreign).unwrap(), b"not ours\n");
     }
 }
