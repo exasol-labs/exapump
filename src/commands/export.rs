@@ -1,11 +1,12 @@
 use std::fs::File;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use arrow::datatypes::SchemaRef;
 use arrow::record_batch::RecordBatch;
 use exarrow_rs::{
-    ArrowExportOptions, CsvExportOptions, ExportSource, ParquetCompression, ParquetExportOptions,
+    ArrowExportOptions, CsvExportOptions, ExportError, ExportSource, ParquetCompression,
+    ParquetExportOptions,
 };
 use parquet::arrow::ArrowWriter;
 use parquet::basic::Compression as ParquetCodec;
@@ -80,13 +81,17 @@ fn resolve_export_source(args: &ExportArgs) -> anyhow::Result<ExportSource> {
     }
 }
 
-/// Rejects `--compression` combined with `--format csv`, before any other
-/// validation runs. `run` calls this first so the compression/format mismatch
-/// is always reported ahead of errors about the export source, keeping the
+/// Rejects a format/option mismatch before any other validation runs:
+/// `--compression` combined with `--format csv`, and `--timeout` combined
+/// with `--format parquet`. `run` calls this first so a mismatched flag is
+/// always reported ahead of errors about the export source, keeping the
 /// error a user sees independent of which validation happens to run first.
-fn reject_compression_for_csv(args: &ExportArgs) -> anyhow::Result<()> {
+fn reject_format_mismatched_options(args: &ExportArgs) -> anyhow::Result<()> {
     if matches!(args.format, ExportFormat::Csv) && args.compression.is_some() {
         anyhow::bail!("--compression is only supported for Parquet format");
+    }
+    if matches!(args.format, ExportFormat::Parquet) && args.timeout.is_some() {
+        anyhow::bail!("--timeout is only supported for CSV format");
     }
     Ok(())
 }
@@ -99,6 +104,10 @@ fn build_csv_options(args: &ExportArgs) -> anyhow::Result<CsvExportOptions> {
 
     if !args.null_value.is_empty() {
         options = options.null_value(&args.null_value);
+    }
+
+    if let Some(secs) = args.timeout {
+        options = options.timeout_ms(secs * 1000);
     }
 
     Ok(options)
@@ -131,6 +140,14 @@ fn resolve_split_limits(args: &ExportArgs) -> anyhow::Result<SplitLimits> {
     })
 }
 
+fn report_removed_output(removed: &[PathBuf]) {
+    if removed.is_empty() {
+        return;
+    }
+    let names: Vec<String> = removed.iter().map(|p| p.display().to_string()).collect();
+    eprintln!("Removed partial output: {}", names.join(", "));
+}
+
 async fn export_csv(
     conn: &mut exarrow_rs::Connection,
     source: ExportSource,
@@ -148,8 +165,14 @@ async fn export_csv(
             with_header,
         );
 
-        conn.export_csv_to_stream(source, &mut split_writer, options)
-            .await?;
+        let result = conn
+            .export_csv_to_stream(source, &mut split_writer, options)
+            .await;
+
+        if let Err(ExportError::Timeout { .. }) = result {
+            report_removed_output(&split_writer.discard());
+        }
+        result?;
 
         let (total_rows, num_files) = split_writer.finish()?;
 
@@ -159,7 +182,13 @@ async fn export_csv(
 
         eprintln!("Exported {total_rows} rows to {num_files} file(s)");
     } else {
-        let rows = conn.export_csv_to_file(source, base_path, options).await?;
+        let result = conn.export_csv_to_file(source, base_path, options).await;
+
+        if let Err(ExportError::Timeout { .. }) = result {
+            report_removed_output(crate::split::remove_partial_output(base_path).as_slice());
+        }
+        let rows = result?;
+
         eprintln!("Exported {rows} rows");
     }
 
@@ -301,7 +330,7 @@ async fn export_parquet(
 
 /// Executes the export command: exports a table or query result to a file.
 pub async fn run(args: ExportArgs) -> anyhow::Result<()> {
-    reject_compression_for_csv(&args)?;
+    reject_format_mismatched_options(&args)?;
 
     let source = resolve_export_source(&args)?;
     let base_path = Path::new(&args.output).to_path_buf();
@@ -348,6 +377,7 @@ mod tests {
             quote: '"',
             no_header: false,
             null_value: String::new(),
+            timeout: None,
             compression: None,
             max_rows_per_file: None,
             max_file_size: None,
@@ -414,11 +444,11 @@ mod tests {
     }
 
     #[test]
-    fn reject_compression_for_csv_rejects_compression_with_csv_format() {
+    fn reject_format_mismatched_options_rejects_compression_with_csv_format() {
         let mut args = base_args();
         args.compression = Some(Compression::Snappy);
 
-        let err = reject_compression_for_csv(&args).unwrap_err();
+        let err = reject_format_mismatched_options(&args).unwrap_err();
 
         assert!(err
             .to_string()
@@ -426,12 +456,12 @@ mod tests {
     }
 
     #[test]
-    fn reject_compression_for_csv_allows_compression_with_parquet_format() {
+    fn reject_format_mismatched_options_allows_compression_with_parquet_format() {
         let mut args = base_args();
         args.format = ExportFormat::Parquet;
         args.compression = Some(Compression::Snappy);
 
-        assert!(reject_compression_for_csv(&args).is_ok());
+        assert!(reject_format_mismatched_options(&args).is_ok());
     }
 
     #[test]
@@ -442,11 +472,33 @@ mod tests {
         args.table = None;
         args.query = None;
 
-        let err = reject_compression_for_csv(&args).unwrap_err();
+        let err = reject_format_mismatched_options(&args).unwrap_err();
 
         assert!(err
             .to_string()
             .contains("--compression is only supported for Parquet format"));
+    }
+
+    #[test]
+    fn reject_format_mismatched_options_rejects_timeout_with_parquet_format() {
+        let mut args = base_args();
+        args.format = ExportFormat::Parquet;
+        args.timeout = Some(30);
+
+        let err = reject_format_mismatched_options(&args).unwrap_err();
+
+        assert!(err
+            .to_string()
+            .contains("--timeout is only supported for CSV format"));
+    }
+
+    #[test]
+    fn reject_format_mismatched_options_allows_timeout_with_csv_format() {
+        let mut args = base_args();
+        args.format = ExportFormat::Csv;
+        args.timeout = Some(30);
+
+        assert!(reject_format_mismatched_options(&args).is_ok());
     }
 
     #[test]
@@ -469,6 +521,35 @@ mod tests {
         let options = build_csv_options(&args).unwrap();
 
         assert_eq!(options.null_value, Some("N/A".to_string()));
+    }
+
+    #[test]
+    fn build_csv_options_leaves_timeout_unset_by_default() {
+        let args = base_args();
+
+        let options = build_csv_options(&args).unwrap();
+
+        assert_eq!(options.timeout_ms, None);
+    }
+
+    #[test]
+    fn build_csv_options_converts_timeout_seconds_to_milliseconds() {
+        let mut args = base_args();
+        args.timeout = Some(30);
+
+        let options = build_csv_options(&args).unwrap();
+
+        assert_eq!(options.timeout_ms, Some(30_000));
+    }
+
+    #[test]
+    fn build_csv_options_converts_the_maximum_timeout_without_overflow() {
+        let mut args = base_args();
+        args.timeout = Some(18_446_744_073_709_551);
+
+        let options = build_csv_options(&args).unwrap();
+
+        assert_eq!(options.timeout_ms, Some(18_446_744_073_709_551_000));
     }
 
     #[test]

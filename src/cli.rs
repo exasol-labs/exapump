@@ -98,6 +98,10 @@ pub struct UploadArgs {
     pub null_value: String,
 }
 
+/// Largest `--timeout` value whose seconds-to-milliseconds conversion in
+/// `build_csv_options` (`secs * 1000`) cannot overflow `u64`.
+const MAX_TIMEOUT_SECONDS: u64 = u64::MAX / 1000;
+
 #[derive(clap::Args)]
 pub struct ExportArgs {
     /// Table to export (e.g., schema.table)
@@ -144,6 +148,10 @@ pub struct ExportArgs {
     /// String to represent NULL values
     #[arg(long, default_value = "")]
     pub null_value: String,
+
+    /// Client-side export deadline in seconds (CSV format only)
+    #[arg(long, value_name = "SECONDS", value_parser = clap::value_parser!(u64).range(1..=MAX_TIMEOUT_SECONDS))]
+    pub timeout: Option<u64>,
 
     /// Compression codec (Parquet only)
     #[arg(long, value_enum)]

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.12.0
+
+- New `--timeout <SECONDS>` option for `exapump export`: sets a client-side deadline on CSV exports; rejected for `--format parquet`
+- Bump exarrow-rs to 0.16.0 (`CsvExportOptions::timeout_ms` becomes `Option<u64>` defaulting to `None`)
+- Fix CSV exports failing at a fixed, undocumented 300-second client-side bound; exports now run until Exasol finishes the EXPORT statement unless `--timeout` is set (#38)
+- Parquet and Arrow exports lose the same implicit 300-second bound and gain no flag to replace it; use `?query_timeout=<seconds>` in the DSN to bound them
+- A CSV export that exceeds `--timeout` now deletes the partial output files it wrote and names them on stderr
+
 ## 0.11.2
 
 - Bump exarrow-rs to 0.13.0 (TLS connections can now accept a self-signed server certificate via the builder; internal dead-code/over-engineering cleanup).

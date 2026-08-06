@@ -1,0 +1,81 @@
+# Plan Review Findings: add-export-timeout-option (round 2)
+
+## Summary
+- Axes checked: 6/6
+- Total findings: 7 (Blockers: 3, Advisory: 4)
+- Intent Fidelity blockers: 0
+
+## Round-1 Blocker Recheck
+
+- **Resolved:** [UNSTATED_ASSUMPTION] *Background revisions had no reader at record time* (B1) — `plan.md:70-76` now carries a `## Recording Notes` section, and `/speq:spec-merge` § Load Plan Context does read `specs/_plans/<plan-name>/plan.md` before applying markers, so the instruction reaches the recorder. The instruction is executable as written: both named targets exist, each has exactly one `# Feature:` description line and exactly one `## Background` paragraph (`specs/cli/export-command-structure/spec.md:3,7`; `specs/export/csv-export/spec.md:3,7`), so "replace the description line and the Background paragraph" resolves to one unambiguous edit per file. Nothing in `recorder-agent.md` § Scope Constraints or `/speq:spec-merge` § Anti-Patterns forbids it — both restrict *scenario* rewriting only. Decision-log [8]'s Decision bullet now points at the section instead of asserting automatic behavior.
+- **Resolved:** [COMPLETENESS_GAP] *Timeout scenarios said nothing about the partial output file* (B2) — all four required parts landed: two `*AND*` clauses on "CSV export exceeding its timeout fails" (`export/csv-export/spec.md:44-45`), a `DELTA:NEW` "Split CSV export exceeding its timeout fails" (`:48-57`), a rewritten decision [6] scoping "structural impossibility" to timer arming (`decision-log.md:58`), and an implementing task 2.4. The downcast survives: `Connection::export_csv_to_file` and `export_csv_to_stream` return `Result<u64, exarrow_rs::export::csv::ExportError>` concretely (0.16.0 `src/adbc/connection.rs`), `ExportError` at the crate root is that CSV type and not `arrow::ExportError` (`src/lib.rs:182` via `export/mod.rs:65-68`), and `Timeout { timeout_ms, transport_terminated }` is a struct variant, so `ExportError::Timeout { .. }` matches. Deletion on the single-file path destroys nothing recoverable — `export_to_file` calls `File::create(file_path)` before the transport work (`0.16.0 src/export/csv.rs:311`), so the path is already truncated when the deadline elapses. The *mechanism* the resolution chose is defective on the split path and undisclosed to users; those are new findings R2-1, R2-2 and R2-3 below, not a reopening of B2.
+- **Resolved:** [TRACEABILITY_GAP] *Decision [7]'s accepted risk was only half-mitigated* (B3) — task 3.1 (`plan.md:105`) now requires the Parquet/Arrow paragraph verbatim: no client-side deadline, none available, pre-0.12.0 implicit 300-second bound, `?query_timeout=<seconds>` as the only remaining bound. Decision [7]'s stated mitigation is now fully covered by tasks 3.1 and 3.2.
+
+## Premortem
+
+Three failure stories drove this round.
+
+1. **A stale split file passes as part of a fresh export.** A nightly job exports with `--max-rows-per-file` and writes `data_000.csv` … `data_005.csv`. The next night the same job runs with `--timeout 900`, elapses after writing three files, and the cleanup removes `data_000.csv` … `data_002.csv`. `data_003.csv` … `data_005.csv` from the previous night survive with valid headers. The downstream `LOAD` globs `data_*.csv` and ingests last night's tail as this night's data — the exact defect B2's cleanup was added to prevent, now reintroduced by the cleanup's own bounds. → R2-2.
+2. **A timed-out export deletes a file exapump never wrote.** An implementer reads "the command MUST NOT leave a file at `data.csv`" in the split scenario, adds `fs::remove_file(base_path)` to the split cleanup path to satisfy it, and a user who happened to have an unrelated `data.csv` in the output directory loses it to a timeout. Nothing in the delta or the task says exapump only owns files it opened. → R2-1.
+3. **The partial file vanishes and no artifact says why.** A user upgrades to 0.12.0, sets `--timeout 900`, and the export elapses. The partial CSV they previously inspected to see how far the export got is gone. They read the CHANGELOG, `docs/file_exchange.md`, plan.md § Impact, and `specs/_decision/` and find deletion mentioned in none of them. → R2-3.
+
+## Intent Fidelity
+
+[no objection — axis checked: the revision changed nothing the user decided. Q1 (CSV-only, hard error on Parquet) is still delivered by task 2.2 and the "Timeout option rejected for Parquet format" scenario; Q2 (`--timeout <seconds>`, plain integer) by task 2.1's `value_parser!(u64).range(1..)`; Q3 (no limit by default) by the 0.16.0 bump, whose `None` default is confirmed in the 0.16.0 CHANGELOG entry and at `src/export/csv.rs:585-590`; Q4 (document `query_timeout`, no flag) by task 3.1 with no `--query-timeout` anywhere in the artifacts. The new task 2.4 is traceable to round-1 B2, which offered exactly the two options the planner chose between, so it is not creep — but the plan never records *which* it chose or why anywhere a user or a future planner will look; that is R2-3 under Task Breakdown, not an intent finding.]
+
+## Feasibility
+
+#### [UNSTATED_ASSUMPTION] BLOCKER
+
+- Location: plan.md § Implementation Tasks, task 2.4 (`plan.md:102`); decision-log.md § Review Findings [2] (`decision-log.md:86`)
+- Issue: task 2.4 specifies the split-path cleanup as `created_paths(&self) -> Vec<PathBuf>`, "returning `split_path(&self.base_path, i)` for `i` in `0..=self.file_index` filtered to paths that exist". The predicate is *existence*, not *authorship*, and `SplitCsvWriter` opens files lazily — `open_next_file` runs only from `flush_line` when the first complete line arrives (`src/split.rs:176-189`). Two consequences, in opposite directions, both reached by a plain re-run into a non-empty directory:
+  - **Over-deletion.** When the deadline elapses before any row is written, `file_index` is still `0` and no file was opened, but a `data_000.csv` left by an earlier run exists — so the cleanup deletes a file this invocation never touched. The decision-log's justification for choosing deletion over leave-and-warn, "`File::create` has already truncated the path so nothing recoverable is lost", is true only of files this run opened and is false for exactly this case.
+  - **Under-deletion.** When an earlier run produced more files than the timed-out run, `0..=file_index` stops short: a run that reaches `file_index == 2` leaves an earlier run's `data_003.csv`+ in place, with valid headers, alongside the freshly cleaned prefix. A downstream job globbing `data_*.csv` then reads a mixed set as one complete export — the failure decision-log Review Finding [2] names as the reason the cleanup exists.
+- Fix: In task 2.4, replace the `created_paths` accessor with a `SplitCsvWriter::discard(&mut self) -> Vec<PathBuf>` method that removes only the files the writer itself opened and returns their paths for the stderr line. Specify the tracking explicitly: add a `created: Vec<PathBuf>` field to `SplitCsvWriter` in `src/split.rs`, push `path` inside `open_next_file` immediately after `File::create(&path)?` succeeds, and have `discard` drop `current_file`, then `std::fs::remove_file` each recorded path, collecting the ones removed. Delete the "filtered to paths that exist" clause and the `0..=self.file_index` range from the task text. Change the required unit tests to "covering zero, one, and three files opened, and asserting that a pre-existing `data_000.csv` the writer never opened survives". Amend decision-log Review Finding [2]'s "Deletion destroys nothing recoverable" sentence to state the bound: exapump removes only paths it opened this run.
+
+## Requirement Quality
+
+#### [REQUIREMENT_CONFLICT] BLOCKER
+
+- Location: `specs/_plans/add-export-timeout-option/export/csv-export/spec.md` § Scenario: Split CSV export exceeding its timeout fails, line 56; same file § Background, line 7; plan.md task 2.4 (`:102`), task 2.6 (`:104`), § Manual Testing row 6 (`:159`)
+- Issue: the new split scenario's last clause reads "the command MUST NOT leave a file at `data.csv`". Three problems, and the delta contradicts itself on the first.
+  - The same file's Background states the rule correctly one paragraph earlier: "An elapsed deadline removes the partial output files **the export had already written**, on both paths." A split export never writes `data.csv` — `SplitCsvWriter` only ever creates `split_path(base, i)` (`src/split.rs:130-131`), and `rename_single_split` is reached only after `finish()`, which the timeout path skips (`src/commands/export.rs:151-158`). So the scenario imposes a MUST on a path the feature does not own, while the Background scopes the same rule to files it does own.
+  - No task implements it. Task 2.4 assigns `base_path` removal to the single-file path only: "Single-file path: remove `base_path`. Split path: … remove each [split file]." A normative MUST with no implementing task is the same defect class as round-1 B3.
+  - The only implementation that satisfies the clause literally is `fs::remove_file(base_path)` on the split path, which deletes a pre-existing user file the command never opened. Task 2.6 ("Assert the output file is gone: … both `data.csv` and every `data_NNN.csv` for the split test") and § Manual Testing row 6 ("no `/tmp/big.csv` and no `/tmp/big_000.csv` on disk") both push the implementer toward that reading. In a clean temp directory the assertion passes either way, so no test distinguishes the safe implementation from the destructive one.
+- Fix: In `export/csv-export/spec.md`, replace the clause "the command MUST NOT leave a file at `data.csv`" with "the command MUST NOT create or remove a file at `data.csv`", and add the matching clause "stderr MUST name every deleted file" so the scenario asserts the cleanup positively. In plan.md task 2.6, replace "both `data.csv` and every `data_NNN.csv` for the split test" with "every `data_NNN.csv` for the split test, and assert that a `data.csv` the test creates before the export is still present and unmodified afterwards". In § Manual Testing row 6, change the expectation to "no `/tmp/big_000.csv` on disk; `/tmp/big.csv` was never created".
+
+## Task Breakdown
+
+#### [TRACEABILITY_GAP] BLOCKER
+
+- Location: decision-log.md § Design Decisions (no entry, `:17-73`); plan.md § Impact (`:80-86`); tasks 3.1 (`:105`) and 3.2 (`:106`)
+- Issue: deleting a user's output file on timeout is the most destructive behavior in this plan, and it is disclosed nowhere a user or a future maintainer will look. It is normative in both spec deltas, but: § Design Decisions has no entry for it — the delete-versus-leave-and-warn choice lives only in § Review Findings [2], which is `Promotes to ADR: no` and therefore never reaches `specs/_decision/`; § Impact's four paragraphs cover the 300-second removal, the Parquet exposure, and the two new rejections, and never mention deletion; task 3.1 adds three things to `docs/file_exchange.md` and none is the deletion; task 3.2's CHANGELOG list has four items and none is the deletion. The asymmetry is stark against decision [7], where a *less* consequential change — Parquet losing an undocumented bound — gets an ADR, a § Impact paragraph, a docs paragraph, and a CHANGELOG line. After recording, the permanent decision log will explain why exarrow-rs owns the timer and why Parquet keeps no bound, and will not explain why exapump deletes files.
+- Fix: Add decision-log entry `### [9] Delete partial output when the export deadline elapses` with `Promotes to ADR: yes`, Alternatives "leave the partial file in place and warn on stderr", and a Rationale stating that `File::create` has already truncated any file the export opened, so the partial file is not recoverable data, and that a truncated CSV with a valid header is silently mis-read by downstream loaders. Add one sentence to plan.md § Impact: "A CSV export that exceeds `--timeout` now deletes the output files it wrote and names them on stderr; earlier versions left the partial file in place." Add to task 3.1: "State in the `--timeout` paragraph that an elapsed deadline deletes the output files the export wrote." Add a fifth CHANGELOG item to task 3.2: "a timed-out CSV export now deletes the partial output files it wrote".
+
+#### [TASK_GRANULARITY] ADVISORY
+
+- Location: plan.md § Implementation Tasks, task 2.6 (`:104`)
+- Issue: `export_split_exceeding_timeout_fails` cannot distinguish "the cleanup deleted the split files" from "the export never got far enough to create one". `SplitCsvWriter` opens `data_000.csv` only when the first complete CSV line reaches `flush_line` (`src/split.rs:176-189`), and the test arms `--timeout 1` against a query chosen to be slow — so the deadline plausibly elapses during SQL execution, before any byte arrives. The asserted post-condition (no `data_NNN.csv` on disk) then holds with task 2.4 entirely unimplemented. The single-file test does not have this hole, because `export_to_file` truncates the path before the transport work runs (`0.16.0 src/export/csv.rs:311`), so absence there does prove deletion.
+- Fix: In task 2.6, add to `export_split_exceeding_timeout_fails`: "Assert stderr names at least one removed `data_NNN.csv` file, so the test fails if the cleanup never ran." State the same requirement for `export_exceeding_timeout_fails` against `data.csv`.
+
+## Design Depth
+
+#### [TACTICAL_SHORTCUT] ADVISORY
+
+- Location: plan.md § Implementation Tasks, task 2.4 (`:102`)
+- Issue: the task routes the cleanup through a runtime downcast — "match the error with `err.downcast_ref::<exarrow_rs::ExportError>()`" — where the error type is statically known. Both call sites return `Result<u64, ExportError>` concretely (0.16.0 `src/adbc/connection.rs`), so the anyhow conversion is exapump's own `?`, applied one line earlier. A downcast that stops matching — an upstream release that wraps `ExportError` in an outer enum, or an intervening `.context()` chain change — returns `None` and silently disables a file-deletion guarantee that two spec scenarios declare as MUST, with no compile error and no test failure outside the two Docker-gated integration tests. A `match` on the concrete `Err(ExportError::Timeout { .. })` before the conversion gives the same behavior and fails to compile if the shape ever changes.
+- Fix: In task 2.4, replace "match the error with `err.downcast_ref::<exarrow_rs::ExportError>()` against `ExportError::Timeout { .. }` (`ExportError` is re-exported at the exarrow-rs crate root)" with "bind the call's `Result<u64, exarrow_rs::ExportError>` before applying `?` and `match` the `Err` arm on `ExportError::Timeout { .. }` directly, so a change to the upstream error shape is a compile error rather than a silently skipped cleanup".
+
+## Prose Quality
+
+#### [PROSE_UNCLEAR] ADVISORY
+
+- Location: plan.md § Impact, paragraph 4 (`:86`)
+- Issue: "No existing command line changes meaning" contradicts paragraphs 1 and 2 of the same section, which state that `exapump export --format csv` without `--timeout` no longer dies at 300 seconds and that a Parquet export "now waits indefinitely". Both are existing command lines whose meaning changes. § Impact is the section that becomes the PR body, so a reviewer meets the contradiction with no way to tell which sentence is load-bearing.
+- Fix: In plan.md § Impact, replace "No existing command line changes meaning." with "No existing flag is renamed or repurposed."
+
+#### [PROSE_BLOAT] ADVISORY
+
+- Location: decision-log.md § Review Findings [2] (`:85-86`), [3] (`:91-92`)
+- Issue: the prose added this round breaks the 25-word sentence cap harder than the round-1 text it sits beside. [2]'s Direction-change bullet is one 55-word sentence carrying four separate changes; [2]'s Finding runs 30 and 38 words in its two sentences; [3]'s Finding runs 32. Governed under `/speq:writing-guardrails` § Scope as decision-log Finding prose. This covers only text written in round 2 — the round-1 `[PROSE_BLOAT]` advisory on plan.md § Summary and § Goals is left alone as instructed.
+- Fix: In decision-log.md Review Finding [2], split the Direction-change bullet into four sentences, one per change (scenario clauses, new split scenario, task 2.4, decision [6] rewrite). Split [2]'s second Finding sentence at "so `split_writer.finish()`". Split [3]'s first Finding sentence at "named the CHANGELOG".

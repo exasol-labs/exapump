@@ -379,6 +379,7 @@ fn export_help_shows_all_arguments() {
         .stdout(predicate::str::contains("--quote"))
         .stdout(predicate::str::contains("--no-header"))
         .stdout(predicate::str::contains("--null-value"))
+        .stdout(predicate::str::contains("--timeout"))
         .stdout(predicate::str::contains("--compression"))
         .stdout(predicate::str::contains("--max-rows-per-file"))
         .stdout(predicate::str::contains("--max-file-size"));
@@ -528,6 +529,77 @@ fn export_compression_rejected_for_csv() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("compression").and(predicate::str::contains("Parquet")));
+}
+
+#[test]
+fn export_timeout_help_documents_seconds_and_csv_only() {
+    fixtures::exapump()
+        .args(["export", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Client-side export deadline in seconds (CSV format only)",
+        ));
+}
+
+#[test]
+fn export_timeout_zero_rejected() {
+    fixtures::exapump()
+        .env("EXAPUMP_DSN", fixtures::DUMMY_DSN)
+        .args([
+            "export",
+            "--table",
+            "schema.table",
+            "--output",
+            "/tmp/test.csv",
+            "--format",
+            "csv",
+            "--timeout",
+            "0",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("--timeout"));
+}
+
+#[test]
+fn export_timeout_above_max_rejected() {
+    fixtures::exapump()
+        .env("EXAPUMP_DSN", fixtures::DUMMY_DSN)
+        .args([
+            "export",
+            "--table",
+            "schema.table",
+            "--output",
+            "/tmp/test.csv",
+            "--format",
+            "csv",
+            "--timeout",
+            "18446744073709552",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("--timeout"));
+}
+
+#[test]
+fn export_timeout_rejected_for_parquet() {
+    fixtures::exapump()
+        .env("EXAPUMP_DSN", fixtures::DUMMY_DSN)
+        .args([
+            "export",
+            "--table",
+            "schema.table",
+            "--output",
+            "/tmp/test.parquet",
+            "--format",
+            "parquet",
+            "--timeout",
+            "60",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("--timeout").and(predicate::str::contains("CSV")));
 }
 
 #[test]
