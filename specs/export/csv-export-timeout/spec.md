@@ -1,10 +1,14 @@
 # Feature: CSV Export Timeout
 
-Bound a CSV export with an optional client-side deadline, covering both the single-file and split paths of `export/csv-export`.
+Bound a CSV export with an optional client-side deadline, armed on both the single-file and split paths of `export/csv-export`.
 
 ## Background
 
-`--timeout <seconds>` bounds the export with a client-side deadline covering SQL execution and data transfer; it applies to both the single-file and split paths. No deadline is armed unless `--timeout` is given. An elapsed deadline removes the partial output files the export had already written, on both paths. A server-enforced bound comes from `?query_timeout=<seconds>` in the DSN instead. `--timeout` is valid only with `--format csv`.
+`--timeout <seconds>` bounds the export with a client-side deadline covering SQL execution and download; it is armed on both the single-file and split paths. No deadline is armed unless `--timeout` is given.
+
+The two paths differ in what the deadline reaches. The single-file path writes as it downloads, so the deadline covers the whole run, and an elapsed deadline removes the partial output file the export had already written. The split path's file-writing phase starts only after the download completes, so it runs unbounded: an elapsed deadline can only fire before the first split file is opened, leaving nothing to remove.
+
+A server-enforced bound comes from `?query_timeout=<seconds>` in the DSN instead. `--timeout` is valid only with `--format csv`.
 
 ## Scenarios
 
@@ -40,12 +44,12 @@ Bound a CSV export with an optional client-side deadline, covering both the sing
 ### Scenario: Split CSV export exceeding its timeout fails
 
 * *GIVEN* a query whose result takes longer than 1 second to export
+* *AND* a file already exists at `data.csv`
 * *WHEN* the user runs `exapump export --query '<slow query>' --output data.csv --format csv --max-rows-per-file 1000 --timeout 1 --dsn <dsn>`
 * *THEN* the command MUST exit with a non-zero code
 * *AND* stderr MUST report that the export timed out after 1000ms
-* *AND* the command MUST delete every `data_NNN.csv` split file it created before exiting
-* *AND* stderr MUST name every deleted file
-* *AND* the command MUST NOT create or remove a file at `data.csv`
+* *AND* the command MUST NOT create any `data_NNN.csv` split file
+* *AND* the pre-existing `data.csv` MUST survive untouched, neither removed nor rewritten
 
 ### Scenario: Timeout option rejected for Parquet format
 

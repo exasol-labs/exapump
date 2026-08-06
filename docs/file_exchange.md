@@ -64,7 +64,7 @@ exapump export --query 'SELECT * FROM t WHERE id > 100' --output result.parquet 
 
 Three different timeouts can bound a CSV export, and only one of them is the flag above. `--timeout` sets a client-side export deadline, in seconds, for CSV exports only. `?query_timeout=<seconds>` in the DSN sets a server-enforced query bound that applies to every format. `?timeout=<seconds>` in the DSN sets only the connection's connect deadline; it does not bound an export. If `--timeout` elapses, exapump deletes the output files the export had written. On a split CSV export (`--max-rows-per-file` or `--max-file-size`), `--timeout` bounds only the download phase; the file-writing phase that follows runs unbounded. The single-file path stays bounded through both phases.
 
-Parquet and Arrow exports have no client-side deadline and cannot take one; `--timeout` is rejected for both formats. exapump versions before 0.12.0 bounded them implicitly at 300 seconds. `?query_timeout=<seconds>` in the DSN is the only bound available for Parquet and Arrow exports.
+A Parquet export has no client-side deadline and cannot take one; `--timeout` is rejected for `--format parquet`. exapump versions before 0.12.0 bounded it implicitly at 300 seconds, whether or not it was split. `?query_timeout=<seconds>` in the DSN is the only bound available for a Parquet export.
 
 ### Examples
 

@@ -537,9 +537,12 @@ fn export_timeout_help_documents_seconds_and_csv_only() {
         .args(["export", "--help"])
         .assert()
         .success()
-        .stdout(predicate::str::contains(
-            "Client-side export deadline in seconds (CSV format only)",
-        ));
+        .stdout(
+            predicate::str::contains("Client-side export deadline in seconds (CSV format only)")
+                .and(predicate::str::contains(
+                    "the deadline bounds only the download phase",
+                )),
+        );
 }
 
 #[test]

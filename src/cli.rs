@@ -150,6 +150,10 @@ pub struct ExportArgs {
     pub null_value: String,
 
     /// Client-side export deadline in seconds (CSV format only)
+    ///
+    /// On a split export (--max-rows-per-file or --max-file-size) the deadline
+    /// bounds only the download phase; the file writing that follows it runs
+    /// unbounded.
     #[arg(long, value_name = "SECONDS", value_parser = clap::value_parser!(u64).range(1..=MAX_TIMEOUT_SECONDS))]
     pub timeout: Option<u64>,
 
