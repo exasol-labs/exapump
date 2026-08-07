@@ -1,10 +1,7 @@
 name: Release
 
-# NOTE: workflow_dispatch is the manual escape hatch for when the push event
-# is lost -- e.g. a GitHub Actions outage swallowing the merge to main. It is
-# safe to run at any time: detect-version gates every downstream job on the
-# Cargo.toml version having no matching tag yet, so a dispatch on an already
-# released commit is a no-op.
+# workflow_dispatch recovers a lost push event -- e.g. an Actions outage
+# swallowing the merge to main.
 on:
   push:
     branches: [main]
@@ -21,6 +18,15 @@ jobs:
       tag: ${{ steps.check.outputs.tag }}
       bumped: ${{ steps.check.outputs.bumped }}
     steps:
+      # A dispatch on any other ref would tag and release an unmerged commit.
+      - name: Refuse refs other than main
+        if: github.ref != 'refs/heads/main'
+        env:
+          REF: ${{ github.ref }}
+        run: |
+          echo "::error::Release runs only on main; refusing ref ${REF}." >&2
+          exit 1
+
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
