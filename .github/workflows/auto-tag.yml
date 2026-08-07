@@ -1,8 +1,11 @@
 name: Release
 
+# workflow_dispatch recovers a lost push event -- e.g. an Actions outage
+# swallowing the merge to main.
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
@@ -15,6 +18,15 @@ jobs:
       tag: ${{ steps.check.outputs.tag }}
       bumped: ${{ steps.check.outputs.bumped }}
     steps:
+      # A dispatch on any other ref would tag and release an unmerged commit.
+      - name: Refuse refs other than main
+        if: github.ref != 'refs/heads/main'
+        env:
+          REF: ${{ github.ref }}
+        run: |
+          echo "::error::Release runs only on main; refusing ref ${REF}." >&2
+          exit 1
+
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
