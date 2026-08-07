@@ -1,8 +1,14 @@
 name: Release
 
+# NOTE: workflow_dispatch is the manual escape hatch for when the push event
+# is lost -- e.g. a GitHub Actions outage swallowing the merge to main. It is
+# safe to run at any time: detect-version gates every downstream job on the
+# Cargo.toml version having no matching tag yet, so a dispatch on an already
+# released commit is a no-op.
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
