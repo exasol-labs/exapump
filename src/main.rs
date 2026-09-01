@@ -2,6 +2,7 @@ mod cli;
 mod commands;
 mod config;
 mod connection;
+mod csv_dialect;
 mod format;
 mod size;
 mod split;

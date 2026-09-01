@@ -347,6 +347,66 @@ pub fn error_hint(message: &str) -> Option<&'static str> {
     }
 }
 
+/// Marker Exasol puts in front of the grammar token it could not accept.
+const UNEXPECTED_TOKEN: &str = "syntax error, unexpected ";
+
+/// Recognise a reserved word used as an identifier.
+///
+/// Exasol rejects `CREATE TABLE t (STATE VARCHAR(2))` with
+/// `syntax error, unexpected STATE_` — the word, plus the trailing underscore
+/// its grammar gives keyword tokens. That message never says the word is
+/// reserved, nor that quoting it is the fix.
+///
+/// Only a token that is a plain word and also appears in the submitted
+/// statement earns the hint, which keeps grammar-internal tokens such as
+/// `UNSIGNED_INTEGER_` or `IDENTIFIER_` out of it.
+fn reserved_word_hint(message: &str, sql: &str) -> Option<String> {
+    let token = message
+        .split_once(UNEXPECTED_TOKEN)?
+        .1
+        .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+        .next()?;
+    let word = token.strip_suffix('_')?;
+
+    if word.is_empty() || !word.bytes().all(|b| b.is_ascii_alphabetic()) {
+        return None;
+    }
+    if !contains_word(sql, word) {
+        return None;
+    }
+
+    Some(format!(
+        "{word} is a reserved word in Exasol. To use it as a column or table \
+         name, quote it as \"{word}\" — a quoted name is case-sensitive."
+    ))
+}
+
+/// Case-insensitive search for `word` as a whole SQL word in `haystack`.
+fn contains_word(haystack: &str, word: &str) -> bool {
+    let haystack = haystack.to_ascii_uppercase();
+    let word = word.to_ascii_uppercase();
+    let bytes = haystack.as_bytes();
+
+    haystack.match_indices(&word).any(|(start, _)| {
+        let end = start + word.len();
+        let starts_free = start == 0 || !is_identifier_byte(bytes[start - 1]);
+        let ends_free = end == bytes.len() || !is_identifier_byte(bytes[end]);
+        starts_free && ends_free
+    })
+}
+
+fn is_identifier_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || byte == b'_'
+}
+
+/// The hint to print for `message`, given the statement that produced it.
+///
+/// A reserved-word collision names the offending word, so it wins over the
+/// generic pattern matches in [`error_hint`].
+pub fn error_guidance(message: &str, sql: &str) -> Option<String> {
+    reserved_word_hint(message, sql).or_else(|| error_hint(message).map(str::to_string))
+}
+
 /// Format a query error to stderr with contextual information.
 fn format_error(stmt_num: usize, sql: &str, error: &exarrow_rs::QueryError) {
     let stderr = std::io::stderr();
@@ -366,7 +426,7 @@ fn format_error(stmt_num: usize, sql: &str, error: &exarrow_rs::QueryError) {
             );
             let _ = writeln!(err);
 
-            if let Some(hint) = error_hint(message) {
+            if let Some(hint) = error_guidance(message, sql) {
                 let _ = writeln!(err, "  Hint: {}", hint);
             } else {
                 let _ = writeln!(
@@ -382,7 +442,7 @@ fn format_error(stmt_num: usize, sql: &str, error: &exarrow_rs::QueryError) {
             let _ = writeln!(err, "  Query execution failed: {}", message);
             let _ = writeln!(err);
 
-            if let Some(hint) = error_hint(message) {
+            if let Some(hint) = error_guidance(message, sql) {
                 let _ = writeln!(err, "  Hint: {}", hint);
             }
         }
@@ -393,7 +453,7 @@ fn format_error(stmt_num: usize, sql: &str, error: &exarrow_rs::QueryError) {
             let _ = writeln!(err, "  {}", other);
 
             let msg = other.to_string();
-            if let Some(hint) = error_hint(&msg) {
+            if let Some(hint) = error_guidance(&msg, sql) {
                 let _ = writeln!(err);
                 let _ = writeln!(err, "  Hint: {}", hint);
             }
@@ -1306,6 +1366,74 @@ mod tests {
     #[test]
     fn hint_no_match() {
         assert_eq!(error_hint("unknown error occurred"), None);
+    }
+
+    // --- reserved-word hint tests ---
+
+    const RESERVED_WORD_ERROR: &str =
+        "Protocol error: syntax error, unexpected STATE_ [line 1, column 54]";
+
+    #[test]
+    fn reserved_word_hint_names_the_word_and_how_to_quote_it() {
+        let hint = error_guidance(
+            RESERVED_WORD_ERROR,
+            "CREATE TABLE addresses (ID DECIMAL(9,0), STATE VARCHAR(2))",
+        )
+        .expect("expected a hint");
+
+        assert!(hint.contains("STATE is a reserved word"), "{hint}");
+        assert!(hint.contains("quote it as \"STATE\""), "{hint}");
+    }
+
+    #[test]
+    fn reserved_word_hint_is_case_insensitive_about_the_statement() {
+        let hint = error_guidance(RESERVED_WORD_ERROR, "create table t (state varchar(2))");
+
+        assert!(hint.is_some_and(|h| h.contains("STATE is a reserved word")));
+    }
+
+    #[test]
+    fn reserved_word_hint_ignores_a_grammar_token_that_is_not_a_word() {
+        // `UNSIGNED_INTEGER_` is a parser token, not a keyword the user typed.
+        let hint = error_guidance(
+            "syntax error, unexpected UNSIGNED_INTEGER_, expecting ASSIGNMENT_OPERATOR_",
+            "SELEC 1",
+        );
+
+        assert_eq!(
+            hint,
+            Some("Check your SQL syntax near the marked position.".to_string())
+        );
+    }
+
+    #[test]
+    fn reserved_word_hint_ignores_a_word_absent_from_the_statement() {
+        let hint = error_guidance(RESERVED_WORD_ERROR, "SELECT 1");
+
+        assert_eq!(
+            hint,
+            Some("Check your SQL syntax near the marked position.".to_string())
+        );
+    }
+
+    #[test]
+    fn reserved_word_hint_requires_a_whole_word_match() {
+        // `ESTATE` merely contains the token; it is not the offending word.
+        let hint = error_guidance(RESERVED_WORD_ERROR, "SELECT ESTATE FROM t");
+
+        assert_eq!(
+            hint,
+            Some("Check your SQL syntax near the marked position.".to_string())
+        );
+    }
+
+    #[test]
+    fn error_guidance_falls_back_to_the_generic_hints() {
+        assert_eq!(
+            error_guidance("object T not found", "SELECT * FROM t"),
+            Some("Check that the table exists and the schema is correct.".to_string())
+        );
+        assert_eq!(error_guidance("unknown error occurred", "SELECT 1"), None);
     }
 
     // --- resolve_sql_input tests ---

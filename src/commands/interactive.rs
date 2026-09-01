@@ -7,7 +7,8 @@ use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
 
 use super::sql::{
-    error_hint, execute_one, split_statements, total_rows, write_csv, write_json, StatementOutcome,
+    error_guidance, execute_one, split_statements, total_rows, write_csv, write_json,
+    StatementOutcome,
 };
 
 const PRIMARY_PROMPT: &str = "exapump> ";
@@ -341,14 +342,14 @@ async fn execute_statement(
     format: InteractiveFormat,
 ) {
     if let Err(e) = execute_and_report(conn, stmt, format).await {
-        print_error(&e);
+        print_error(&e, stmt);
     }
 }
 
-fn print_error(error: &exarrow_rs::QueryError) {
+fn print_error(error: &exarrow_rs::QueryError, sql: &str) {
     eprintln!("Error: {}", error);
     let msg = error.to_string();
-    if let Some(hint) = error_hint(&msg) {
+    if let Some(hint) = error_guidance(&msg, sql) {
         eprintln!("Hint: {}", hint);
     }
 }

@@ -21,6 +21,18 @@ exapump upload *.parquet --table schema.my_table
 | `--no-header` | — | Treat the first row as data, not a header |
 | `--null-value` | `""` | String to interpret as NULL |
 
+### Line endings
+
+exapump reads the file's own line endings and imports under a matching row
+separator, so a CSV written on Windows — or by Python's `csv.writer`, whose
+default line terminator is `\r\n` — loads exactly like a Unix one.
+A `\r`, an `\n` or a `\r\n` inside a quoted field is data and is preserved.
+
+A file that mixes both styles is refused before anything is loaded, because
+Exasol imports the whole file under one row separator and either choice would
+misread part of the data. Convert it first, for example with `dos2unix`, then
+upload it again.
+
 ### Examples
 
 ```bash

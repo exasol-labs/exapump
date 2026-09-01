@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.12.1
+
+- Fix silent data corruption when uploading a CSV with CRLF line endings: exapump imported every file under `ROW SEPARATOR = 'LF'`, which left a `\r` on the last column of every row (`LENGTH('Critical')` returned 9, not 8). The row separator is now read from the file itself, quote-aware, so a `\r`, `\n` or `\r\n` inside a quoted field stays part of the value
+- `upload` now refuses a CSV that mixes CRLF and LF row endings, naming the file, the count of rows in each style and how to convert it. Exasol imports under a single row separator, so such a file was previously part-corrupted; the refusal happens before any table is created
+- `sql` and `interactive` name the offending word when Exasol rejects a reserved word used as an identifier (`syntax error, unexpected STATE_`) and say to quote it
+- `sql -f <file>` now explains that `-f/--format` picks the output format and points at `exapump sql - < <file>`; other `--format` values keep clap's existing message
+
 ## 0.12.0
 
 - New `--timeout <SECONDS>` option for `exapump export`: sets a client-side deadline on CSV exports; rejected for `--format parquet`

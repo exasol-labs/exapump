@@ -88,9 +88,40 @@ async fn parquet_import(path: &std::path::Path, args: &UploadArgs) -> anyhow::Re
     Ok(())
 }
 
+/// Pick the `ROW SEPARATOR` for the IMPORT statement from the file's own line
+/// endings.
+///
+/// Exasol applies one separator to the whole file, and naming the wrong one is
+/// silent: `LF` against a CRLF file appends a `\r` to the last column of every
+/// row, and `CRLF` against an LF file yields zero imported rows. A file that
+/// mixes both styles has no correct answer, so it is refused rather than
+/// half-loaded.
+fn resolve_row_separator(
+    path: &std::path::Path,
+    args: &UploadArgs,
+) -> anyhow::Result<exarrow_rs::ImportRowSeparator> {
+    let endings =
+        crate::csv_dialect::detect_row_endings(path, args.quote as u8, args.delimiter as u8)?;
+
+    match endings {
+        crate::csv_dialect::RowEndings::Lf => Ok(exarrow_rs::ImportRowSeparator::LF),
+        crate::csv_dialect::RowEndings::Crlf => Ok(exarrow_rs::ImportRowSeparator::CRLF),
+        crate::csv_dialect::RowEndings::Mixed { crlf, lf } => anyhow::bail!(
+            "{}: mixed line endings — {crlf} rows end with CRLF and {lf} with LF. \
+             Exasol imports a file under a single row separator, so part of the data \
+             would be misread. Convert the file to one style first, for example \
+             `dos2unix {}` or `sed -i 's/\\r$//' {}`, then upload it again.",
+            path.display(),
+            path.display(),
+            path.display(),
+        ),
+    }
+}
+
 async fn csv_import(path: &std::path::Path, args: &UploadArgs) -> anyhow::Result<()> {
     let inference_options = build_csv_inference_options(args);
     let schema = exarrow_rs::types::infer_schema_from_csv(path, &inference_options)?;
+    let row_separator = resolve_row_separator(path, args)?;
 
     let mut conn = args.conn.connect().await?;
 
@@ -105,6 +136,7 @@ async fn csv_import(path: &std::path::Path, args: &UploadArgs) -> anyhow::Result
     let mut import_options = exarrow_rs::CsvImportOptions::new()
         .column_separator(args.delimiter)
         .column_delimiter(args.quote)
+        .row_separator(row_separator)
         .skip_rows(if args.no_header { 0 } else { 1 });
 
     if !args.null_value.is_empty() {

@@ -76,3 +76,18 @@ The `sql` subcommand is available as `exapump sql`. Connection arguments (`--dsn
 * *GIVEN* a valid DSN and SQL statement
 * *WHEN* the user runs `exapump sql 'SELECT ...'` without `--format`
 * *THEN* the command MUST default to CSV output format
+
+### Scenario: A file name given to --format is rejected with the way to run a file
+
+* *GIVEN* exapump is installed
+* *WHEN* the user runs `exapump sql -f query.sql 'SELECT 1' --dsn <dsn>`
+* *THEN* the CLI MUST exit with a non-zero code
+* *AND* stderr MUST state that `-f/--format` picks the output format, not an input file
+* *AND* stderr MUST show `exapump sql - < query.sql` as the way to run the file
+
+### Scenario: An ordinary --format typo keeps clap's rejection
+
+* *GIVEN* exapump is installed
+* *WHEN* the user runs `exapump sql -f jsonl 'SELECT 1' --dsn <dsn>`
+* *THEN* the CLI MUST exit with a non-zero code
+* *AND* stderr MUST list the accepted values without the input-file guidance

@@ -361,6 +361,72 @@ async fn sql_execute_script_without_returns_table_displays_ok() {
         .unwrap();
 }
 
+#[test]
+fn sql_format_rejecting_a_file_name_points_at_stdin() {
+    // `-f` reads as "file", so this is a common first attempt. The rejection
+    // has to name the way that does work.
+    fixtures::exapump()
+        .args([
+            "sql",
+            "-f",
+            "ddl.sql",
+            "--dsn",
+            fixtures::DUMMY_DSN,
+            "SELECT 1",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid value 'ddl.sql'"))
+        .stderr(predicate::str::contains(
+            "picks the output format, not an input file",
+        ))
+        .stderr(predicate::str::contains("exapump sql - < ddl.sql"));
+}
+
+#[test]
+fn sql_format_typo_keeps_the_ordinary_rejection() {
+    // Not a file name, so the file hint would be noise; clap's own
+    // did-you-mean is the better answer.
+    fixtures::exapump()
+        .args([
+            "sql",
+            "-f",
+            "jsonl",
+            "--dsn",
+            fixtures::DUMMY_DSN,
+            "SELECT 1",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid value 'jsonl'"))
+        .stderr(predicate::str::contains("json"))
+        .stderr(predicate::str::contains("input file").not());
+}
+
+#[tokio::test]
+async fn sql_reserved_word_error_names_the_word_and_the_fix() {
+    fixtures::require_exasol!();
+    let (mut conn, schema_name) = fixtures::setup_exasol_schema("EXAPUMP_RESERVED").await;
+
+    // Exasol answers this with `syntax error, unexpected STATE_`, which says
+    // neither that STATE is reserved nor that quoting it is the way out.
+    fixtures::exapump()
+        .args([
+            "sql",
+            "--dsn",
+            fixtures::DOCKER_DSN,
+            &format!("CREATE TABLE {schema_name}.ADDRESSES (ID DECIMAL(9,0), STATE VARCHAR(2))"),
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("STATE is a reserved word"))
+        .stderr(predicate::str::contains("quote it as \"STATE\""));
+
+    let _ = conn
+        .execute_update(&format!("DROP SCHEMA {schema_name} CASCADE"))
+        .await;
+}
+
 // --- Export subcommand tests ---
 
 #[test]

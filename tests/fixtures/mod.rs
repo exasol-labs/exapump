@@ -204,6 +204,20 @@ pub fn create_test_csv(dir: &std::path::Path) -> PathBuf {
     path
 }
 
+/// Renders one column of a result set as strings, whatever its Exasol type.
+/// Keeps assertions on imported values free of per-type downcasting.
+#[allow(dead_code)]
+pub fn column_as_strings(batches: &[RecordBatch], column: usize) -> Vec<String> {
+    let mut values = Vec::new();
+    for batch in batches {
+        let array = batch.column(column);
+        for row in 0..batch.num_rows() {
+            values.push(arrow::util::display::array_value_to_string(array, row).unwrap());
+        }
+    }
+    values
+}
+
 /// Creates a CSV file with custom content at `dir/{filename}`.
 /// Returns the path to the created file.
 #[allow(dead_code)]
