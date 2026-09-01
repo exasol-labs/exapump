@@ -34,8 +34,9 @@ pub struct SqlArgs {
     #[command(flatten)]
     pub conn: crate::connection::ConnectionArgs,
 
-    /// Output format for SELECT results
-    #[arg(short, long, value_enum, default_value_t = OutputFormat::Csv)]
+    /// Output format for SELECT results (to run SQL held in a file, pipe it in:
+    /// `exapump sql - < query.sql`)
+    #[arg(short, long, value_parser = OutputFormatParser, default_value = "csv")]
     pub format: OutputFormat,
 }
 
@@ -43,6 +44,65 @@ pub struct SqlArgs {
 pub enum OutputFormat {
     Csv,
     Json,
+}
+
+/// clap's enum parser for `--format`, with one extra sentence for the value
+/// that gets typed most often by mistake.
+///
+/// `-f` reads as "file", so `exapump sql -f query.sql` is a common first
+/// attempt. Plain clap answers `invalid value 'query.sql' for '--format'`,
+/// which names the wrong flag as the problem and leaves the user no closer to
+/// running the file.
+#[derive(Clone)]
+pub struct OutputFormatParser;
+
+impl clap::builder::TypedValueParser for OutputFormatParser {
+    type Value = OutputFormat;
+
+    fn parse_ref(
+        &self,
+        cmd: &clap::Command,
+        arg: Option<&clap::Arg>,
+        value: &std::ffi::OsStr,
+    ) -> Result<Self::Value, clap::Error> {
+        clap::builder::EnumValueParser::<OutputFormat>::new()
+            .parse_ref(cmd, arg, value)
+            .map_err(|err| file_mistaken_for_format(cmd, value).unwrap_or(err))
+    }
+
+    fn possible_values(
+        &self,
+    ) -> Option<Box<dyn Iterator<Item = clap::builder::PossibleValue> + '_>> {
+        Some(Box::new(
+            <OutputFormat as clap::ValueEnum>::value_variants()
+                .iter()
+                .filter_map(clap::ValueEnum::to_possible_value),
+        ))
+    }
+}
+
+/// Replace the `--format` rejection when the value looks like a file name.
+///
+/// Returns `None` for anything else — a plain typo such as `--format jsonl` is
+/// better served by clap's own message.
+fn file_mistaken_for_format(cmd: &clap::Command, value: &std::ffi::OsStr) -> Option<clap::Error> {
+    let value = value.to_str()?;
+    if !looks_like_a_file_name(value) {
+        return None;
+    }
+
+    Some(cmd.clone().error(
+        clap::error::ErrorKind::InvalidValue,
+        format!(
+            "invalid value '{value}' for '--format <FORMAT>' [possible values: csv, json]\n\n  \
+             -f/--format picks the output format, not an input file.\n  \
+             To run the SQL held in {value}, pipe it in: exapump sql - < {value}"
+        ),
+    ))
+}
+
+fn looks_like_a_file_name(value: &str) -> bool {
+    value.contains('/') || value.contains('\\') || std::path::Path::new(value).extension().is_some()
 }
 
 #[derive(clap::ValueEnum, Clone, Debug)]

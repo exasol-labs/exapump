@@ -4,7 +4,7 @@ SQL errors are formatted with contextual information to help users diagnose issu
 
 ## Background
 
-Errors are printed to stderr with an `Error in statement N:` prefix. Syntax errors include a pointer (`^`) under the error position. Execution errors include the failing SQL indented. Hints are best-effort pattern matches on the Exasol error message.
+Errors are printed to stderr with an `Error in statement N:` prefix. Syntax errors include a pointer (`^`) under the error position. Execution errors include the failing SQL indented. Hints are best-effort pattern matches on the Exasol error message and on the statement that produced it.
 
 ## Scenarios
 
@@ -46,3 +46,17 @@ Errors are printed to stderr with an `Error in statement N:` prefix. Syntax erro
 * *GIVEN* the Exasol error message contains "insufficient privileges" or "not allowed"
 * *WHEN* the error is formatted
 * *THEN* stderr MUST include a hint like "The user may not have the required permissions."
+
+### Scenario: Hint for a reserved word used as an identifier
+
+* *GIVEN* the Exasol error message reads `syntax error, unexpected <WORD>_`
+* *AND* `<WORD>` is a plain word that appears in the submitted statement
+* *WHEN* the error is formatted
+* *THEN* stderr MUST include a hint naming `<WORD>` as an Exasol reserved word
+* *AND* the hint MUST say to quote it to use it as a column or table name
+
+### Scenario: No reserved-word hint for a grammar token
+
+* *GIVEN* the unexpected token is a parser token such as `UNSIGNED_INTEGER_` rather than a word in the statement
+* *WHEN* the error is formatted
+* *THEN* stderr MUST fall back to the generic syntax-error hint

@@ -21,6 +21,9 @@ cat query.sql | exapump sql
 |------|---------|-------------|
 | `--format` / `-f` | `csv` | Output format: `csv` or `json` |
 
+`-f` selects the **output format**, not an input file. To run the SQL held in
+a file, pipe it in: `exapump sql - < query.sql`.
+
 ### Examples
 
 ```bash
@@ -31,7 +34,7 @@ exapump sql 'SELECT * FROM t'
 exapump sql -f json 'SELECT * FROM t'
 
 # Read SQL from a file
-exapump sql < migration.sql
+exapump sql - < migration.sql
 ```
 
 ---
