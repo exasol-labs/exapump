@@ -469,3 +469,140 @@ async fn exasol_csv_flags_ignored_for_parquet() {
         .execute_update(&format!("DROP SCHEMA {schema_name} CASCADE"))
         .await;
 }
+
+// --- Line-ending handling on ingest ---
+
+#[test]
+fn csv_upload_refuses_a_file_with_mixed_line_endings() {
+    let dir = tempfile::tempdir().unwrap();
+    // Row 2 ends with a bare LF; every other row ends with CRLF.
+    let csv_path = fixtures::create_csv_with_content(
+        dir.path(),
+        "mixed.csv",
+        "id,name,priority\r\n1,Alice,Critical\r\n2,Bob,Low\n3,Cy,High\r\n",
+    );
+
+    fixtures::exapump()
+        .args([
+            "upload",
+            csv_path.to_str().unwrap(),
+            "--table",
+            "my_table",
+            "--dsn",
+            fixtures::DUMMY_DSN,
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("mixed line endings"))
+        .stderr(predicate::str::contains(
+            "3 rows end with CRLF and 1 with LF",
+        ))
+        .stderr(predicate::str::contains("mixed.csv"));
+}
+
+/// Regression test for silent CRLF corruption.
+///
+/// Exasol imports under a single `ROW SEPARATOR`. When exapump named `LF` for
+/// every file, a CSV written by a Windows editor — or by Python's `csv.writer`,
+/// whose default line terminator is `\r\n` — loaded with a `\r` welded onto the
+/// last column of every row. Nothing failed: the row count was right and the
+/// only visible symptom was `LENGTH('Critical')` returning 9 instead of 8.
+#[tokio::test]
+async fn exasol_csv_import_of_a_crlf_file_leaves_no_carriage_return_in_the_data() {
+    fixtures::require_exasol!();
+
+    let (mut conn, schema_name) = fixtures::setup_exasol_schema("EXAPUMP_CSV").await;
+
+    let dir = tempfile::tempdir().unwrap();
+    let csv_path = fixtures::create_csv_with_content(
+        dir.path(),
+        "crlf.csv",
+        "id,name,priority\r\n1,Alice,Critical\r\n2,Bob,Low\r\n",
+    );
+    let table = format!("{schema_name}.CRLF_TEST");
+
+    fixtures::exapump()
+        .timeout(std::time::Duration::from_secs(60))
+        .args([
+            "upload",
+            csv_path.to_str().unwrap(),
+            "--table",
+            &table,
+            "--dsn",
+            fixtures::DOCKER_DSN,
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Imported 2 rows"));
+
+    let rs = conn
+        .execute(&format!(
+            "SELECT \"priority\", CAST(LENGTH(\"priority\") AS VARCHAR(4)) \
+             FROM {table} ORDER BY \"id\""
+        ))
+        .await
+        .unwrap();
+    let batches = rs.fetch_all().await.unwrap();
+
+    assert_eq!(
+        fixtures::column_as_strings(&batches, 0),
+        vec!["Critical", "Low"],
+        "last column carries a line-ending byte"
+    );
+    assert_eq!(
+        fixtures::column_as_strings(&batches, 1),
+        vec!["8", "3"],
+        "last column is one byte too long"
+    );
+
+    let _ = conn
+        .execute_update(&format!("DROP SCHEMA {schema_name} CASCADE"))
+        .await;
+}
+
+/// A `\r`, an `\n` or a `\r\n` inside a quoted field is data, and survives the
+/// import of a CRLF file untouched.
+#[tokio::test]
+async fn exasol_csv_import_of_a_crlf_file_preserves_quoted_line_breaks() {
+    fixtures::require_exasol!();
+
+    let (mut conn, schema_name) = fixtures::setup_exasol_schema("EXAPUMP_CSV").await;
+
+    let dir = tempfile::tempdir().unwrap();
+    let csv_path = fixtures::create_csv_with_content(
+        dir.path(),
+        "quoted.csv",
+        "id,note\r\n1,\"two\r\nlines\"\r\n2,\"has\rcr\"\r\n",
+    );
+    let table = format!("{schema_name}.CRLF_QUOTED");
+
+    fixtures::exapump()
+        .timeout(std::time::Duration::from_secs(60))
+        .args([
+            "upload",
+            csv_path.to_str().unwrap(),
+            "--table",
+            &table,
+            "--dsn",
+            fixtures::DOCKER_DSN,
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Imported 2 rows"));
+
+    let rs = conn
+        .execute(&format!("SELECT \"note\" FROM {table} ORDER BY \"id\""))
+        .await
+        .unwrap();
+    let batches = rs.fetch_all().await.unwrap();
+
+    assert_eq!(
+        fixtures::column_as_strings(&batches, 0),
+        vec!["two\r\nlines", "has\rcr"],
+        "quoted line breaks must reach Exasol byte for byte"
+    );
+
+    let _ = conn
+        .execute_update(&format!("DROP SCHEMA {schema_name} CASCADE"))
+        .await;
+}

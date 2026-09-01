@@ -8,6 +8,8 @@ exapump connects to Exasol via exarrow-rs using the DSN provided by `--dsn` or `
 
 Default CSV parsing behavior: comma delimiter, double-quote quoting, first row treated as header, empty strings treated as NULL.
 
+Exasol applies one `ROW SEPARATOR` to an entire IMPORT, so the row separator is not a user option: exapump scans the file and names the separator the file actually uses. The scan is quote-aware, so a `\r`, an `\n` or a `\r\n` inside a quoted field is data, not a record boundary.
+
 ## Scenarios
 
 ### Scenario: Upload CSV file to existing table
@@ -36,6 +38,33 @@ Default CSV parsing behavior: comma delimiter, double-quote quoting, first row t
 * *AND* the command MUST print the planned CREATE TABLE DDL statement
 * *AND* the command MUST NOT connect to Exasol or modify any data
 * *AND* the command MUST exit with code 0
+
+### Scenario: CRLF line endings
+
+* *GIVEN* a CSV file whose rows all end with `\r\n`
+* *WHEN* the user runs `exapump upload data.csv --table schema.table --dsn <dsn>`
+* *THEN* the command MUST import the file under a CRLF row separator
+* *AND* no imported value may carry a trailing carriage return
+
+### Scenario: LF line endings
+
+* *GIVEN* a CSV file whose rows all end with `\n`
+* *WHEN* the user runs `exapump upload data.csv --table schema.table --dsn <dsn>`
+* *THEN* the command MUST import the file under an LF row separator
+
+### Scenario: Line breaks inside a quoted field
+
+* *GIVEN* a CSV file with a quoted field containing `\r`, `\n` or `\r\n`
+* *WHEN* the user runs `exapump upload data.csv --table schema.table --dsn <dsn>`
+* *THEN* the command MUST NOT treat the quoted bytes as a record boundary
+* *AND* the imported value MUST keep those bytes unchanged
+
+### Scenario: Mixed line endings
+
+* *GIVEN* a CSV file where some rows end with `\r\n` and others with `\n`
+* *WHEN* the user runs `exapump upload data.csv --table schema.table --dsn <dsn>`
+* *THEN* the command MUST exit with a non-zero code before creating a table or importing any row
+* *AND* stderr MUST name the file, report how many rows use each style, and say how to convert the file
 
 ### Scenario: Custom delimiter
 
