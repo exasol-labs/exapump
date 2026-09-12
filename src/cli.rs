@@ -182,7 +182,7 @@ pub struct BucketFsArgs {
     pub command: BucketfsCommands,
 }
 
-#[derive(clap::Args, Clone)]
+#[derive(clap::Args, Clone, Default)]
 pub struct BfsConnectionOverrides {
     /// Connection profile name
     #[arg(long)]

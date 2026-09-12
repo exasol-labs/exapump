@@ -1,0 +1,45 @@
+# Code Review Findings: bucketfs-profile-override-fallback
+
+## Summary
+- Files reviewed: 11
+- Total findings: 4 (standard: 3, expert: 1)
+
+Round-2 plan-review recheck: all 9 advisory findings are applied in the artifacts. [SCOPE_REDUCTION] (plan.md:20, :90), both [UNSTATED_ASSUMPTION] findings (plan.md tasks 3.1-3.4, and `EXAPUMP_CONFIG` is set in every new test), [COMPLETENESS_GAP] branch 6 (plan.md:39, task 2.2 "six-branch", scenario "Host-only run still fails when no default profile is set", task 3.9, coverage row), [AMBIGUOUS_REQUIREMENT] (spec delta bullets 4 and 5 rewritten verbatim), [COMPLETENESS_GAP] certificate assertion (spec scenario + unit test `self_sufficient_overrides_ignore_profile_validate_certificate`), [REQUIREMENT_CONFLICT] (`config/profiles` DELTA:CHANGED for "Read auth falls back to write_password" + plan.md:18), [TRACEABILITY_GAP] (coverage rows for `multiple_defaults_error` and `no_default_among_multiple_error`, renamed unit row, sentence at plan.md:175), [PROSE_UNCLEAR] (all four passages rewritten). Every test named in plan.md § Verification exists in the source.
+
+The [INFORMATION_LEAKAGE] finding's *wording* is applied (`effective_read_password` added, `resolve_connection` does not restate the fallback) but its *purpose* is not: see the Expert finding below.
+
+Evidence: `cargo clippy --all-targets` clean, `cargo fmt --check` clean, `cargo test --bin exapump` 357 passed / 0 failed. The container-backed integration tests in `tests/bucketfs_test.rs` were not run in this review.
+
+## Standard fixes
+
+### src/commands/bucketfs.rs
+
+#### [CONTEXTLESS_ERROR] BucketFS credential errors name only profile keys, on the path that has no profile
+- Location: lines 90, 109, 144, 168, 199, 214
+- Issue: five error messages state the remedy as a config-file key: `"Authentication failed. Set bfs_read_password or bfs_write_password in your profile."` (lines 90, 168), `"Authentication failed. Set bfs_write_password in your profile."` (lines 144, 214), and `"bfs_write_password is required for write operations"` (lines 109, 199). This change makes the override-only invocation the documented way to run `bucketfs` without a config file (`docs/bucketfs.md` "Connection Options", CHANGELOG 0.13.0 bullet 1). On that path there is no profile, so the message points the user at a file that does not exist and never names the flag that would fix the run. The constraint violated is stated, the reachable remedy is not.
+- Fix: In src/commands/bucketfs.rs, rewrite the five credential error messages so each names the flag alongside the profile key. Lines 90 and 168 become `"Authentication failed. Pass --bfs-read-password or --bfs-write-password, or set bfs_read_password or bfs_write_password in your profile."`. Lines 144 and 214 become `"Authentication failed. Pass --bfs-write-password, or set bfs_write_password in your profile."`. Lines 109 and 199 become `"A write password is required for write operations. Pass --bfs-write-password, or set bfs_write_password in your profile."`. Update the two existing assertions in `tests/bucketfs_test.rs` that match on this text if any break, and add no new test.
+
+#### [IMPLEMENTATION_COUPLED_TEST] Unit test asserts a private field of `BucketFsClient`
+- Location: line 630
+- Issue: `client_reads_with_the_write_password_when_no_read_password_is_set` builds a `BucketFsClient` and asserts `client.read_password.as_deref()`, a private struct field. `/speq:code-guardrails` § Tests requires assertions on observable behavior, never internal state. The behavior the test claims to cover ("client reads with the write password") is the Basic-auth credential on the wire, which the assertion never reaches, and the line under test is a one-expression delegation to `BfsConnection::effective_read_password`. That method is already covered directly by `read_credential_falls_back_to_write_password_flag` (src/commands/bucketfs.rs) and by `effective_read_password_falls_back_to_the_write_password` (src/config.rs), and the wire behavior is covered by `overrides_only_lists_bucket_without_config` in `tests/bucketfs_test.rs`, which passes only `--bfs-write-password` and still lists the bucket.
+- Fix: In src/commands/bucketfs.rs, delete the test `client_reads_with_the_write_password_when_no_read_password_is_set` (lines 629-640) and remove `BucketFsClient` from the `use super::{...}` import at the top of the `tests` module if it becomes unused.
+
+### src/config.rs
+
+#### [DUPLICATE_TEST] Second defaults test repeats an existing one with literal values
+- Location: line 505
+- Issue: `bfs_connection_defaults_use_port_2581_and_bucket_default` has the same arrange as `bfs_connection_with_defaults_uses_standard_values` (line 494) and a strict subset of its assertions, differing only in comparing against the literals `2581` and `"default"` instead of `DEFAULT_BFS_PORT` and `DEFAULT_BFS_BUCKET`. The literal `2581` is already pinned by the pre-existing `resolve_bfs_connection_port_defaults_to_2581` (line 428). plan.md task 1.1 and § Verification > Scenario Coverage name only `bfs_connection_with_defaults_uses_standard_values`, so this test is unmandated as well as redundant.
+- Fix: In src/config.rs, delete the test `bfs_connection_defaults_use_port_2581_and_bucket_default` (lines 505-510).
+
+## Expert fixes
+
+### src/config.rs
+
+#### [INFORMATION_LEAKAGE] The write-to-read credential fallback still has two owners, and the duplicate is a live defect
+- Location: line 94
+- Issue: plan.md § Design > Patterns names `BfsConnection::effective_read_password` the "Single owner for the write-to-read credential fallback", applying the rule "once, over the merged connection". `Profile::resolve_bfs_connection` still applies the same rule a second time, one value source earlier: `read_password: self.bfs_read_password.clone().or_else(|| self.bfs_write_password.clone())` (lines 94-97). Two modules now encode one decision, and the earlier one wins because it fills `BfsConnection.read_password` before `resolve_connection` merges the flags.
+
+  That duplicate is the sole cause of the stale read password that decision-log.md entry [4] records as an unavoidable "Known consequence". Trace for a profile with `bfs_write_password = "old"` and no `bfs_read_password`, running `exapump bucketfs ls --bfs-write-password new`: `base_connection` reaches the default-profile branch, `resolve_bfs_connection` derives `read_password = Some("old")`, `resolve_connection` sets `write_password = Some("new")` and keeps `read_password = Some("old")`, and `effective_read_password` returns `"old"`. The read authenticates with the superseded password and fails with `Authentication failed` after a password rotation.
+
+  Entry [4]'s stated rationale for accepting this — "Recovering the distinction needs a second field on `BfsConnection`, which this plan does not add" — is false. Dropping the `.or_else` leaves `read_password` meaning only "explicitly configured read password", and `effective_read_password` then returns `"new"` from the merged `write_password`. No new field is needed. Every recorded scenario stays satisfied: `config/profiles` "Read auth falls back to write_password" (profile `bfs_write_password = "wp"`, no read password) still resolves to `wp`, because the merged connection carries `write_password = Some("wp")` and `read_password = None`. `BfsConnection.read_password` is read in exactly two places outside tests, both in src/commands/bucketfs.rs (`resolve_connection` line 328, `BucketFsClient::new` line 27), so the change has no other call site.
+- Fix: In src/config.rs, change the `read_password` field initialiser in `Profile::resolve_bfs_connection` (lines 94-97) to `read_password: self.bfs_read_password.clone(),`. Then change the existing test `resolve_bfs_connection_read_password_falls_back_to_write_password` (line 472) to assert `assert_eq!(conn.effective_read_password(), Some("writepw"));` instead of `assert_eq!(conn.read_password, Some("writepw".to_string()));`, and rename it to `resolve_bfs_connection_read_credential_falls_back_to_write_password`. Add one unit test in src/commands/bucketfs.rs named `write_password_flag_replaces_the_profile_derived_read_credential` that builds a `Profile` with `bfs_write_password = Some("old")` and no `bfs_read_password`, resolves it through `base_connection` with `BfsConnectionOverrides { bfs_write_password: Some("new".to_string()), ..Default::default() }` and `resolve_connection`, and asserts `conn.effective_read_password() == Some("new")`; write that test first and show it failing before the src/config.rs change. Then in specs/_plans/bucketfs-profile-override-fallback/decision-log.md entry [4], delete the `**Known consequence:**` bullet and its second-field claim, and replace it with one sentence recording that `Profile::resolve_bfs_connection` leaves `read_password` unset when only a write password is configured, so `BfsConnection::effective_read_password` is the single place the fallback is applied. Finally, run `cargo test --bin exapump` and `cargo clippy --all-targets` and show both clean.

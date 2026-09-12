@@ -48,11 +48,12 @@ No live interview ran. The orchestrator started this plan in headless mode and p
 
 ### [4] `--bfs-write-password` supplies the read credential as a last resort
 
-- **Decision:** `resolve_connection` resolves the read credential as `--bfs-read-password`, then the base read password, then `--bfs-write-password`.
+- **Decision:** The read credential resolves as `--bfs-read-password`, then the base read password, then `--bfs-write-password`. `BfsConnection::effective_read_password` owns the last step and applies it once over the merged connection, so `resolve_connection` never restates the write-to-read fallback.
 - **Alternatives:**
   - *Leave the read credential unset.* Rejected. The repro command in issue #46 is `ls`, which reads. With a defaults base and only `--bfs-write-password`, the request would carry no credential and fail on a non-public bucket. The reported fix would not fix the reported command.
   - *Put `--bfs-write-password` ahead of the base read password.* Rejected. A profile with an explicit `bfs_read_password` would then lose it whenever the caller passed `--bfs-write-password`, which changes behavior for callers this plan does not target.
-- **Rationale:** The chosen order only adds a value where the resolved read password is currently `None`, so no existing resolution changes except an anonymous read that now authenticates. `Profile::resolve_bfs_connection` already applies the same write-to-read fallback to the profile fields, so the flags now match the fields.
+- **Rationale:** The chosen order only adds a value where the resolved read password is currently `None`, so no existing resolution changes except an anonymous read that now authenticates.
+- **Single owner:** `Profile::resolve_bfs_connection` leaves `read_password` unset when a profile configures only a write password, so `BfsConnection::effective_read_password` is the single place the write-to-read fallback is applied, and `BfsConnection.read_password` means an explicitly configured read password and nothing else.
 - **Promotes to ADR:** no
 
 ### [5] The failure with no host and no profile names both remedies

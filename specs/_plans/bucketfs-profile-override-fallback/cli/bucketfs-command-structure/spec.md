@@ -14,8 +14,8 @@ The config file is a fallback value source, not a precondition. exapump selects 
 * `--profile <name>` selects that profile. A name that is not in the config is an error.
 * Otherwise, `--bfs-host` together with `--bfs-write-password` or `--bfs-read-password` selects the BucketFS defaults. exapump reads no profile in this case.
 * Otherwise, the default profile is the base when one resolves, whether or not `--bfs-host` is given.
-* Otherwise, `--bfs-host` alone selects the BucketFS defaults when the config holds zero profiles. Any other profile-resolution failure MUST propagate.
-* Otherwise, the command fails and names both remedies.
+* Otherwise, `--bfs-host` alone selects the BucketFS defaults when the config holds zero profiles. With `--bfs-host` present, any other profile-resolution failure MUST propagate unchanged.
+* Otherwise, the command fails, names both remedies, and keeps the profile-resolution error as the cause.
 <!-- /DELTA:CHANGED -->
 
 ## Scenarios
@@ -32,12 +32,13 @@ The config file is a fallback value source, not a precondition. exapump selects 
 
 ### Scenario: Self-sufficient overrides ignore the default profile
 
-* *GIVEN* a config file whose single profile sets `bfs_bucket = "wrongbucket"` and `bfs_port = 9999`
+* *GIVEN* a config file whose single profile sets `bfs_bucket = "wrongbucket"`, `bfs_port = 9999`, and `bfs_validate_certificate = false`
 * *AND* the user provides `--bfs-host` and `--bfs-write-password`
 * *AND* the user provides no `--profile`, `--bfs-bucket`, or `--bfs-port` flag
 * *WHEN* the bucketfs command resolves connection parameters
 * *THEN* the bucket MUST be `default`
 * *AND* the port MUST be `2581`
+* *AND* certificate validation MUST be enabled
 
 ### Scenario: Named profile stays the base when overrides are self-sufficient
 
@@ -81,6 +82,15 @@ The config file is a fallback value source, not a precondition. exapump selects 
 * *WHEN* the user runs `exapump bucketfs ls`
 * *THEN* the CLI MUST exit with a non-zero code
 * *AND* stderr MUST list the conflicting profile names
+
+### Scenario: Host-only run still fails when no default profile is set
+
+* *GIVEN* a config file holding two profiles and no `default = true`
+* *AND* the user provides `--bfs-host` and no BucketFS credential flag
+* *AND* the user provides no `--profile` flag
+* *WHEN* the user runs `exapump bucketfs ls`
+* *THEN* the CLI MUST exit with a non-zero code
+* *AND* stderr MUST suggest adding `default = true` to one profile
 
 ### Scenario: Default profile stays the base when no override is given
 

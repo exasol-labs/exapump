@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 pub const DEFAULT_PORT: u16 = 8563;
 pub const DEFAULT_BFS_PORT: u16 = 2581;
+pub const DEFAULT_BFS_BUCKET: &str = "default";
 
 pub type Config = BTreeMap<String, Profile>;
 
@@ -47,32 +48,55 @@ pub struct BfsConnection {
     pub validate_certificate: bool,
 }
 
+impl BfsConnection {
+    /// Builds a BucketFS connection from the host alone. The host is the only
+    /// BucketFS field without a default, so it is the only argument: port,
+    /// bucket, TLS, and certificate validation take their standard values and
+    /// the connection carries no credentials.
+    ///
+    /// This constructor is the single owner of those defaults. Every other
+    /// resolution path reads them from here instead of restating the literals.
+    pub fn with_defaults(host: String) -> Self {
+        Self {
+            host,
+            port: DEFAULT_BFS_PORT,
+            bucket: DEFAULT_BFS_BUCKET.to_string(),
+            write_password: None,
+            read_password: None,
+            tls: true,
+            validate_certificate: true,
+        }
+    }
+
+    /// The password a read operation sends, or `None` for an anonymous read.
+    ///
+    /// A write password serves as the read credential when the connection has
+    /// no read password. This method is the single owner of that fallback, so
+    /// it is applied once, over the fully merged connection, rather than once
+    /// per value source.
+    pub fn effective_read_password(&self) -> Option<&str> {
+        self.read_password
+            .as_deref()
+            .or(self.write_password.as_deref())
+    }
+}
+
 impl Profile {
     pub fn resolve_bfs_connection(&self) -> BfsConnection {
         let host = self.bfs_host.clone().unwrap_or_else(|| self.host.clone());
-        let port = self.bfs_port.unwrap_or(DEFAULT_BFS_PORT);
-        let bucket = self
-            .bfs_bucket
-            .clone()
-            .unwrap_or_else(|| "default".to_string());
-        let write_password = self.bfs_write_password.clone();
-        let read_password = self
-            .bfs_read_password
-            .clone()
-            .or_else(|| self.bfs_write_password.clone());
-        let tls = self.bfs_tls.unwrap_or_else(|| self.tls.unwrap_or(true));
-        let validate_certificate = self
-            .bfs_validate_certificate
-            .unwrap_or_else(|| self.validate_certificate.unwrap_or(true));
+        let defaults = BfsConnection::with_defaults(host);
 
         BfsConnection {
-            host,
-            port,
-            bucket,
-            write_password,
-            read_password,
-            tls,
-            validate_certificate,
+            host: defaults.host,
+            port: self.bfs_port.unwrap_or(defaults.port),
+            bucket: self.bfs_bucket.clone().unwrap_or(defaults.bucket),
+            write_password: self.bfs_write_password.clone(),
+            read_password: self.bfs_read_password.clone(),
+            tls: self.bfs_tls.or(self.tls).unwrap_or(defaults.tls),
+            validate_certificate: self
+                .bfs_validate_certificate
+                .or(self.validate_certificate)
+                .unwrap_or(defaults.validate_certificate),
         }
     }
 
@@ -442,11 +466,11 @@ password = "s3cret"
     }
 
     #[test]
-    fn resolve_bfs_connection_read_password_falls_back_to_write_password() {
+    fn resolve_bfs_connection_read_credential_falls_back_to_write_password() {
         let mut profile = minimal_profile();
         profile.bfs_write_password = Some("writepw".to_string());
         let conn = profile.resolve_bfs_connection();
-        assert_eq!(conn.read_password, Some("writepw".to_string()));
+        assert_eq!(conn.effective_read_password(), Some("writepw"));
     }
 
     #[test]
@@ -461,6 +485,39 @@ password = "s3cret"
         let profile = minimal_profile();
         let conn = profile.resolve_bfs_connection();
         assert_eq!(conn.write_password, None);
+    }
+
+    #[test]
+    fn bfs_connection_with_defaults_uses_standard_values() {
+        let conn = BfsConnection::with_defaults("bfshost".to_string());
+        assert_eq!(conn.host, "bfshost");
+        assert_eq!(conn.port, DEFAULT_BFS_PORT);
+        assert_eq!(conn.bucket, DEFAULT_BFS_BUCKET);
+        assert!(conn.tls);
+        assert!(conn.validate_certificate);
+        assert_eq!(conn.write_password, None);
+        assert_eq!(conn.read_password, None);
+    }
+
+    #[test]
+    fn effective_read_password_prefers_the_read_password() {
+        let mut conn = BfsConnection::with_defaults("bfshost".to_string());
+        conn.read_password = Some("readpw".to_string());
+        conn.write_password = Some("writepw".to_string());
+        assert_eq!(conn.effective_read_password(), Some("readpw"));
+    }
+
+    #[test]
+    fn effective_read_password_falls_back_to_the_write_password() {
+        let mut conn = BfsConnection::with_defaults("bfshost".to_string());
+        conn.write_password = Some("writepw".to_string());
+        assert_eq!(conn.effective_read_password(), Some("writepw"));
+    }
+
+    #[test]
+    fn effective_read_password_is_none_without_any_password() {
+        let conn = BfsConnection::with_defaults("bfshost".to_string());
+        assert_eq!(conn.effective_read_password(), None);
     }
 
     #[test]

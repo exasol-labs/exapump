@@ -62,6 +62,15 @@ The read credential resolves in this order: `--bfs-read-password`, then the base
 <!-- /DELTA:CHANGED -->
 
 <!-- DELTA:CHANGED -->
+### Scenario: Read auth falls back to write_password
+
+* *GIVEN* a profile with `bfs_write_password = "wp"` and no `bfs_read_password`
+* *WHEN* a BucketFS read operation resolves credentials
+* *THEN* the resolved read password MUST be `wp`
+* *AND* the Basic-auth username sent for the read is out of scope for this plan, tracked against the mismatch between `w:wp` and the `r` username that `BucketFsClient` sends
+<!-- /DELTA:CHANGED -->
+
+<!-- DELTA:CHANGED -->
 ### Scenario: Read auth falls back to anonymous on public bucket
 
 * *GIVEN* a profile with no `bfs_write_password` and no `bfs_read_password`

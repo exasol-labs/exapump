@@ -55,6 +55,138 @@ fn cleanup_path(config_path: &std::path::Path, path: &str) {
 }
 
 #[test]
+fn overrides_only_lists_bucket_without_config() {
+    fixtures::require_bucketfs!();
+    let write_pw = fixtures::bfs_write_password();
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join("no-such-config.toml");
+
+    bfs_cmd(&config_path)
+        .args([
+            "bucketfs",
+            "ls",
+            "--bfs-host",
+            "localhost",
+            "--bfs-port",
+            "2581",
+            "--bfs-write-password",
+            &write_pw,
+            "--bfs-validate-certificate",
+            "false",
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("No profiles found in config").not());
+}
+
+#[test]
+fn overrides_only_ignores_default_profile_bucket() {
+    fixtures::require_bucketfs!();
+    let write_pw = fixtures::bfs_write_password();
+    let dir = tempfile::tempdir().unwrap();
+    let config_dir = dir.path().join(".exapump");
+    std::fs::create_dir_all(&config_dir).unwrap();
+    let config_path = config_dir.join("config.toml");
+    std::fs::write(
+        &config_path,
+        r#"
+[bfs]
+host = "localhost"
+user = "sys"
+password = "exasol"
+bfs_bucket = "wrongbucket"
+bfs_port = 9999
+bfs_validate_certificate = false
+"#,
+    )
+    .unwrap();
+
+    // Neither --bfs-bucket nor --bfs-port is given, so the profile's
+    // `wrongbucket` and port 9999 would break the run if it were the base.
+    bfs_cmd(&config_path)
+        .args([
+            "bucketfs",
+            "ls",
+            "--bfs-host",
+            "localhost",
+            "--bfs-write-password",
+            &write_pw,
+            "--bfs-validate-certificate",
+            "false",
+        ])
+        .assert()
+        .success();
+}
+
+#[test]
+fn host_override_inherits_default_profile_password() {
+    fixtures::require_bucketfs!();
+    let write_pw = fixtures::bfs_write_password();
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = write_bfs_config(dir.path(), &write_pw);
+    let prefix = unique_prefix();
+
+    let src_file = dir.path().join("host_inherit.txt");
+    std::fs::write(&src_file, "host override inheritance test\n").unwrap();
+    let remote_path = format!("{prefix}host_inherit.txt");
+
+    // No password flag and no --profile: the upload can only authenticate if
+    // the default profile still supplies `bfs_write_password`.
+    bfs_cmd(&config_path)
+        .args([
+            "bucketfs",
+            "cp",
+            src_file.to_str().unwrap(),
+            &remote_path,
+            "--bfs-host",
+            "localhost",
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Uploaded"));
+
+    cleanup_path(&config_path, &remote_path);
+}
+
+#[test]
+fn named_profile_stays_base_with_overrides() {
+    fixtures::require_bucketfs!();
+    let write_pw = fixtures::bfs_write_password();
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = write_bfs_config(dir.path(), &write_pw);
+
+    // No --bfs-validate-certificate flag: the run reaches the self-signed
+    // container only if the named profile stays the base and keeps
+    // `bfs_validate_certificate = false`.
+    bfs_cmd(&config_path)
+        .args([
+            "bucketfs",
+            "ls",
+            "--profile",
+            "bfs",
+            "--bfs-host",
+            "localhost",
+            "--bfs-write-password",
+            &write_pw,
+        ])
+        .assert()
+        .success();
+}
+
+#[test]
+fn default_profile_lists_bucket_without_profile_flag() {
+    fixtures::require_bucketfs!();
+    let write_pw = fixtures::bfs_write_password();
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = write_bfs_config(dir.path(), &write_pw);
+
+    bfs_cmd(&config_path)
+        .args(["bucketfs", "ls"])
+        .assert()
+        .success();
+}
+
+#[test]
 fn list_bucket_root() {
     fixtures::require_bucketfs!();
     let write_pw = fixtures::bfs_write_password();
