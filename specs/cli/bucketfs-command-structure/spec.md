@@ -4,7 +4,9 @@ The `bucketfs` subcommand group provides file management operations against Exas
 
 ## Background
 
-BucketFS is Exasol's built-in distributed file system for storing JARs, UDF scripts, and other artifacts. It exposes an HTTP/HTTPS REST API on a configurable port (default: 2581 HTTPS). Authentication uses Basic auth with dedicated read/write passwords. The `bucketfs` subcommand group is available as `exapump bucketfs <subcommand>`. Connection parameters come from the profile system — BucketFS reuses `host` (overridable via `bfs_host`), defaults bucket to `"default"`, port to `2581`, and inherits `tls`/`validate_certificate` (overridable via `bfs_tls`/`bfs_validate_certificate`). Per-command flags can override any profile value.
+BucketFS is Exasol's built-in distributed file system for storing JARs, UDF scripts, and other artifacts. It exposes an HTTP/HTTPS REST API on a configurable port (default: 2581 HTTPS). Authentication uses Basic auth with dedicated read/write passwords. The `bucketfs` subcommand group is available as `exapump bucketfs <subcommand>`.
+
+Connection parameters come from three sources: per-command `--bfs-*` flags, a profile, and the BucketFS defaults. See `bucketfs/connection-resolution` and `bucketfs/connection-resolution-errors` for the resolution order and its failure modes.
 
 ## Scenarios
 
@@ -45,31 +47,3 @@ BucketFS is Exasol's built-in distributed file system for storing JARs, UDF scri
 * *WHEN* the user runs `exapump bucketfs rm --help`
 * *THEN* the output MUST show a `<PATH>` positional argument
 * *AND* the output MUST show a `--recursive` flag
-
-### Scenario: BucketFS works with minimal profile
-
-* *GIVEN* a profile exists with only database fields (`host`, `user`, `password`) and `bfs_write_password`
-* *AND* no other BucketFS fields or flags are provided
-* *WHEN* the user runs `exapump bucketfs ls --profile <name>`
-* *THEN* the CLI MUST connect using the profile's `host`, port `2581`, bucket `default`, and the profile's `tls`/`validate_certificate` settings
-
-### Scenario: BucketFS connection from profile
-
-* *GIVEN* a profile exists with `bfs_write_password` field
-* *WHEN* the user runs `exapump bucketfs ls --profile <name>`
-* *THEN* the CLI MUST use BucketFS connection parameters from the profile
-* *AND* the host MUST fall back to the profile's `host` field
-
-### Scenario: BucketFS flags override profile
-
-* *GIVEN* a profile exists with BucketFS fields
-* *AND* the user provides `--bfs-host` on the command line
-* *WHEN* the bucketfs command resolves connection parameters
-* *THEN* the `--bfs-host` flag value MUST take precedence over the profile
-
-### Scenario: BucketFS port defaults to 2581
-
-* *GIVEN* BucketFS connection parameters are provided
-* *AND* no `--bfs-port` flag and no `bfs_port` profile field is set
-* *WHEN* the bucketfs command resolves connection parameters
-* *THEN* the port MUST default to `2581` (HTTPS)

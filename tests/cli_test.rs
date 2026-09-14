@@ -732,6 +732,106 @@ fn bucketfs_rm_help_shows_path() {
 }
 
 #[test]
+fn bucketfs_without_host_or_profile_names_both_remedies() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join("no-such-config.toml");
+
+    fixtures::exapump()
+        .env("EXAPUMP_CONFIG", config_path.to_str().unwrap())
+        .args(["bucketfs", "ls"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("--bfs-host"))
+        .stderr(predicate::str::contains("exapump profile add"))
+        .stderr(predicate::str::contains("No profiles found in config"));
+}
+
+#[test]
+fn bucketfs_host_override_without_config_skips_profile_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join("no-such-config.toml");
+
+    fixtures::exapump()
+        .env("EXAPUMP_CONFIG", config_path.to_str().unwrap())
+        .args([
+            "bucketfs",
+            "ls",
+            "--bfs-host",
+            "127.0.0.1",
+            "--bfs-port",
+            "1",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("No profiles found in config").not())
+        .stderr(
+            predicate::str::contains("not reachable")
+                .or(predicate::str::contains("error sending request")),
+        );
+}
+
+#[test]
+fn bucketfs_host_override_reports_ambiguous_default_profile() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join("config.toml");
+    std::fs::write(
+        &config_path,
+        r#"
+[alpha]
+host = "alpha.example.com"
+user = "u"
+password = "p"
+default = true
+
+[beta]
+host = "beta.example.com"
+user = "u"
+password = "p"
+default = true
+"#,
+    )
+    .unwrap();
+
+    fixtures::exapump()
+        .env("EXAPUMP_CONFIG", config_path.to_str().unwrap())
+        .args(["bucketfs", "ls", "--bfs-host", "127.0.0.1"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Multiple default profiles found"))
+        .stderr(predicate::str::contains("alpha"))
+        .stderr(predicate::str::contains("beta"));
+}
+
+#[test]
+fn bucketfs_host_override_reports_missing_default_profile() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join("config.toml");
+    std::fs::write(
+        &config_path,
+        r#"
+[alpha]
+host = "alpha.example.com"
+user = "u"
+password = "p"
+
+[beta]
+host = "beta.example.com"
+user = "u"
+password = "p"
+"#,
+    )
+    .unwrap();
+
+    fixtures::exapump()
+        .env("EXAPUMP_CONFIG", config_path.to_str().unwrap())
+        .args(["bucketfs", "ls", "--bfs-host", "127.0.0.1"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("No default profile set"))
+        .stderr(predicate::str::contains("default = true"));
+}
+
+#[test]
 fn certificate_fingerprint_flag_in_help_for_all_commands() {
     for cmd in ["upload", "export", "sql", "interactive"] {
         fixtures::exapump()

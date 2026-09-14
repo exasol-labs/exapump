@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.13.0
+
+- `exapump bucketfs <ls|cp|rm>` now treats `~/.exapump/config.toml` as a fallback value source instead of a precondition: `--bfs-host` together with `--bfs-write-password` or `--bfs-read-password` builds the connection on its own and needs no profile, so the command works on a machine that has no config file (#46)
+- **Breaking.** When `--bfs-host` is passed together with a BucketFS password flag and no `--profile`, exapump no longer reads any profile. `bfs_port`, `bfs_bucket`, `bfs_tls`, and `bfs_validate_certificate` now come from the BucketFS defaults (port `2581`, bucket `default`, TLS on, certificate validation on). A caller that relied on inheriting those from a default profile must add `--profile <name>` or the matching `--bfs-*` flag; against a self-signed certificate, add `--bfs-validate-certificate false`
+- `--bfs-write-password` now also serves as the read credential when neither `--bfs-read-password` nor a profile read password is set, so a read that previously ran anonymously now authenticates
+- `exapump bucketfs ls` with neither `--bfs-host` nor a resolvable profile now names both remedies on stderr and keeps the original profile-resolution error as the cause
+
 ## 0.12.0
 
 - New `--timeout <SECONDS>` option for `exapump export`: sets a client-side deadline on CSV exports; rejected for `--format parquet`

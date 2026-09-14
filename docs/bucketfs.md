@@ -43,7 +43,7 @@ exapump bucketfs rm models/model.pkl
 
 ## Connection Options
 
-BucketFS commands resolve their connection from your profile, with optional CLI overrides:
+BucketFS commands resolve their connection from your profile, with optional CLI overrides. A profile is not required: `--bfs-host` together with `--bfs-write-password` or `--bfs-read-password` fully specifies a connection, and the command then reads no profile at all. This works on a machine that has no `~/.exapump/config.toml`.
 
 | Flag | Description |
 |------|-------------|
@@ -84,11 +84,20 @@ bfs_read_password = "bucketpw"
 
 ## Parameter Resolution
 
-Parameters are resolved in this order (highest to lowest priority):
+Resolution runs in two steps. exapump first picks a base connection, then applies the `--bfs-*` flags on top of it.
 
-1. CLI flags (e.g. `--bfs-host`)
-2. Profile fields (e.g. `bfs_host`)
-3. Smart defaults (e.g. `bfs_host` falls back to `host`, `bfs_port` defaults to `2581`)
+The config file is a fallback value source, not a precondition. The first rule below that matches picks the base:
+
+1. `--profile <name>` selects that profile. A name that is not in the config is an error.
+2. `--bfs-host` together with `--bfs-write-password` or `--bfs-read-password` selects the BucketFS defaults. exapump reads no profile in this case.
+3. The default profile is the base when one resolves, whether or not `--bfs-host` is given.
+4. `--bfs-host` alone selects the BucketFS defaults when the config holds no profiles.
+5. `--bfs-host` alone with a config that holds profiles but resolves no default reports the profile error, so an ambiguous or missing `default = true` stays visible.
+6. Without `--bfs-host` and without a resolvable profile, the command fails and names both remedies: pass `--bfs-host`, or create a profile with `exapump profile add`.
+
+The BucketFS defaults are port `2581`, bucket `default`, TLS on, and certificate validation on. Against a BucketFS with a self-signed certificate, add `--bfs-validate-certificate false`.
+
+A `--bfs-*` flag always outranks the base. A field that neither the flags nor the base supplies takes its default: a profile base falls back to `host`, `tls`, and `validate_certificate` from the profile's database fields, then to the BucketFS defaults.
 
 ## Authentication
 
@@ -97,4 +106,4 @@ BucketFS uses HTTP Basic authentication with role-based usernames:
 - **Read operations** (`ls`, `cp` download): authenticated as user `r` with the read password
 - **Write operations** (`cp` upload, `rm`): authenticated as user `w` with the write password
 
-If `bfs_read_password` is not set, it falls back to `bfs_write_password`.
+If no read password is set, the write password serves as the read credential. This applies to the profile fields and to the flags: `--bfs-write-password` supplies the read credential when neither `--bfs-read-password` nor a profile read password is set. A read against a public bucket with no password set at all is still sent without authentication.
