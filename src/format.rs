@@ -6,9 +6,10 @@ use anyhow::{bail, Result};
 pub enum FileFormat {
     Parquet,
     Csv,
+    Json,
 }
 
-const SUPPORTED_FORMATS: &str = ".parquet, .csv";
+const SUPPORTED_FORMATS: &str = ".parquet, .csv, .json, .ndjson";
 
 /// Returns an error listing supported formats when the extension is unrecognized.
 pub fn detect_from_path(path: &Path) -> Result<FileFormat> {
@@ -17,6 +18,7 @@ pub fn detect_from_path(path: &Path) -> Result<FileFormat> {
     match ext.to_ascii_lowercase().as_str() {
         "parquet" => Ok(FileFormat::Parquet),
         "csv" => Ok(FileFormat::Csv),
+        "json" | "ndjson" => Ok(FileFormat::Json),
         _ => bail!("file format {ext:?} is not supported. Supported formats: {SUPPORTED_FORMATS}"),
     }
 }
@@ -40,7 +42,7 @@ mod tests {
 
     #[test]
     fn unsupported_extension_returns_error_with_supported_formats() {
-        let result = detect_from_path(Path::new("data.json"));
+        let result = detect_from_path(Path::new("data.txt"));
         let err = result.unwrap_err();
         let msg = err.to_string();
         assert!(
@@ -48,7 +50,7 @@ mod tests {
             "error should mention not supported: {msg}"
         );
         assert!(
-            msg.contains(".parquet, .csv"),
+            msg.contains(".parquet, .csv, .json, .ndjson"),
             "error should list supported formats: {msg}"
         );
     }
@@ -63,6 +65,30 @@ mod tests {
     fn uppercase_csv_extension_returns_csv() {
         let result = detect_from_path(Path::new("data.CSV"));
         assert_eq!(result.unwrap(), FileFormat::Csv);
+    }
+
+    #[test]
+    fn json_extension_returns_json() {
+        let result = detect_from_path(Path::new("data.json"));
+        assert_eq!(result.unwrap(), FileFormat::Json);
+    }
+
+    #[test]
+    fn uppercase_json_extension_returns_json() {
+        let result = detect_from_path(Path::new("data.JSON"));
+        assert_eq!(result.unwrap(), FileFormat::Json);
+    }
+
+    #[test]
+    fn ndjson_extension_returns_json() {
+        let result = detect_from_path(Path::new("data.ndjson"));
+        assert_eq!(result.unwrap(), FileFormat::Json);
+    }
+
+    #[test]
+    fn uppercase_ndjson_extension_returns_json() {
+        let result = detect_from_path(Path::new("data.NDJSON"));
+        assert_eq!(result.unwrap(), FileFormat::Json);
     }
 
     #[test]

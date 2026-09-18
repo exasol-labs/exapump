@@ -1,6 +1,6 @@
 [package]
 name = "exapump"
-version = "0.13.0"
+version = "0.14.0"
 edition = "2021"
 description = "The simplest path from file to Exasol table — a single-binary CLI for CSV and Parquet ingest."
 license = "MIT"
@@ -30,6 +30,8 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 rpassword = "7"
 inquire = { version = "0.9", default-features = false, features = ["crossterm"] }
+json_tables_core = { git = "https://github.com/exasol-labs/exasol-json-tables", tag = "v0.3" }
+serde_json = "1"
 
 [dev-dependencies]
 assert_cmd = "2"

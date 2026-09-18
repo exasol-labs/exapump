@@ -71,7 +71,7 @@ Full documentation is available in the [docs/](docs/index.md) directory.
 
 | Command | Description | Docs |
 |---------|-------------|------|
-| `upload` | Upload CSV or Parquet files to an Exasol table | [File Exchange](docs/file_exchange.md) |
+| `upload` | Upload CSV, Parquet, JSON, or NDJSON files to an Exasol table | [File Exchange](docs/file_exchange.md) |
 | `export` | Export a table or query result to CSV or Parquet | [File Exchange](docs/file_exchange.md) |
 | `sql` | Execute SQL statements and print results | [SQL Interaction](docs/sql_interaction.md) |
 | `interactive` | Start an interactive SQL session | [SQL Interaction](docs/sql_interaction.md) |

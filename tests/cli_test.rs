@@ -64,6 +64,17 @@ fn upload_help_shows_all_arguments() {
 }
 
 #[test]
+fn upload_help_documents_json_subtable_creation() {
+    fixtures::exapump()
+        .args(["upload", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "For JSON or NDJSON input, this names the root table; exapump creates one subtable per nested object or array path",
+        ));
+}
+
+#[test]
 fn csv_flags_shown_with_defaults_in_help() {
     fixtures::exapump()
         .args(["upload", "--help"])
