@@ -33,6 +33,8 @@ The command creates, loads, and reports the tables of a family in a deterministi
 
 All tables are created with `CREATE TABLE IF NOT EXISTS`, so a repeated run against the same target loads into the existing family. Primary-key and foreign-key constraint statements are out of scope for this feature.
 
+Limit: generated `_id` values repeat across runs. `json_tables_core` restarts the `_id` counter at 1 on every run, so an `_id` value is unique only within one run. A `_parent` value therefore resolves only against the rows that the same run wrote. The command prints this limit as a warning on stderr on every import.
+
 Rows are imported per table over `exarrow_rs::Connection::import_from_record_batches`. The import is not atomic across the table family. A failure partway through leaves the tables already loaded in place.
 
 The whole family is buffered in memory before the import starts. A top-level JSON array is also parsed as one value. Peak memory therefore scales with the file size, and NDJSON framing is the shape to prefer for a large input because it streams the read pass. This feature adds no chunking or spill-to-disk.
@@ -111,6 +113,7 @@ The whole family is buffered in memory before the import starts. A top-level JSO
 * *WHEN* the user runs the same `exapump upload orders.json --table sales.orders --dsn <dsn>` again
 * *THEN* the command MUST NOT fail on table creation
 * *AND* the command MUST append the documents to the existing tables
+* *AND* the command MUST print a warning to stderr stating that `_id` values repeat across runs and the family linkage holds only within one run
 * *AND* the command MUST exit with code 0
 
 ### Scenario: Unqualified table name uses the connection schema

@@ -1,7 +1,5 @@
 # Plan: add-json-import
 
-> **Status:** blocked — see open-questions.md
-
 ## Summary
 
 Add JSON and NDJSON ingest to `exapump upload`, turning one document set into a relational table family (root table plus one subtable per nested object or array path). exapump reuses the `json_tables_core` crate from `exasol-labs/exasol-json-tables` for normalization and keeps ownership of file reading, connection handling, and the Exasol import.
@@ -53,12 +51,15 @@ impl TableFamily {
 }
 
 /// Creates the family's tables and loads every document from `path`.
-/// Returns the row count loaded per table, in family order.
+///
+/// The returned vector holds the row count loaded per table, in family order.
+/// On a failure it holds every table loaded before the error. On success it
+/// holds every table of the family. The returned option holds the failure.
 pub async fn load(
     family: &TableFamily,
     path: &Path,
     conn: &mut exarrow_rs::Connection,
-) -> anyhow::Result<Vec<(String, u64)>>;
+) -> (Vec<(String, u64)>, Option<anyhow::Error>);
 ```
 
 Family order is the order of the `build_all_schema_plans` output, which `StatsCollector::finish` sorts by table path (`json_tables_core/src/infer.rs:81-85`). `TableFamily` stores that vector as `plans` and never reorders it. The sort key is `TablePath::to_string()`, which renders the root path as the literal `root` and a nested path as its dotted segments. The root table therefore sorts among the subtables by that word, not first. A family of root, `customer`, and `items[]` orders as `customer`, `items[]`, `root`. Every step that walks the family walks `family.plans`: the CREATE statements, the imports, and the row-count report. `ColumnBuffers` stores its tables in a `HashMap<TablePath, TableBuffer>`, so `ColumnBuffers::tables()` yields a per-process random order and no code path in this feature calls it. Buffers are resolved by key instead, through `ColumnBuffers::table(&plan.path)`.
@@ -123,7 +124,7 @@ To keep one `--table` value produce the same root table across all three formats
 | Depend on `json_tables_core` only, not on `json_to_parquet` | Depend on `json_to_parquet` and call `run(Args)` | `json_to_parquet` exposes one entry point with private fields and opens its own connection from a raw URL, bypassing exapump's DSN, profile, fingerprint, and transport resolution. |
 | Full multi-table fan-out in the first release | Ship flat JSON only, defer nesting | Flat-only JSON needs none of `json_tables_core` and does not match `exasol-json-tables`. The nesting is the capability the user asked for. |
 | Import through `import_from_record_batches` | Stage Parquet files and call `import_parquet_from_files`, as upstream does | Removes the temporary directory, the Parquet writer, and its cleanup logic. exapump's mission defines the tool as a thin wrapper over exarrow-rs. |
-| `CREATE TABLE IF NOT EXISTS` and no constraint statements | Emit the constraint statements and ignore failures; probe the catalog for pre-existing tables | `build_sql_schema` emits plain `CREATE TABLE` plus `ALTER TABLE ... ADD CONSTRAINT`, so a second run fails on both. exapump's upload contract is re-runnable. The constraints are emitted `DISABLE` upstream and enforce nothing, and the `_id`, `_parent`, and `_pos` linkage columns still carry the relationship. Ignoring errors or parsing error strings is worse. Recorded as a follow-up. |
+| `CREATE TABLE IF NOT EXISTS` and no constraint statements | Emit the constraint statements and ignore failures; probe the catalog for pre-existing tables | `build_sql_schema` emits plain `CREATE TABLE` plus `ALTER TABLE ... ADD CONSTRAINT`, so a second run fails on both. exapump's upload contract is re-runnable. The constraints are emitted `DISABLE` upstream and enforce nothing. `TableBuffer` restarts `_id` at 1 on every run, so the linkage columns resolve only within one run, and every import warns about that on stderr. Ignoring errors or parsing error strings is worse. Recorded as a follow-up. |
 | Not atomic across the family, with explicit partial-load reporting | Wrap the family in one transaction | Whether the HTTP-transport IMPORT participates in a surrounding transaction is unverified for this exarrow-rs version. Claiming atomicity without evidence is worse than reporting what loaded. |
 | `.json` and `.ndjson` only | Also accept `.jsonl` | Framing is detected from file content, so `.jsonl` adds no capability, only a third spelling. Add it when a user asks. |
 | One file per invocation | Expand `args.files` for JSON | `upload` reads `args.files[0]` for CSV and Parquet today. Changing that is a separate concern for all three formats. |
@@ -178,8 +179,8 @@ MIT is already listed in both `deny.toml` (`[licenses].allow`) and `about.toml` 
 - [ ] 2.4 Replace the task 1.2a `(FileFormat::Json, true)` bail arm in `src/commands/upload.rs` with the dry-run dispatch into `json_tables`, and declare the `json_tables` module in `src/main.rs`.
 - [ ] 2.5 Write the failing `tests/json_test.rs` tests for the load scenarios against the Exasol Docker container: flat import, nested subtable creation, generated key columns, NDJSON, content-detected framing, mixed scalar types, explicit null mask, repeated run, unqualified table name, unqualified table name with no connection schema, and partial-family failure reporting.
 - [ ] 2.6 Implement the `ColumnBuffers` to `arrow::RecordBatch` bridge in `src/json_tables.rs`. Iterate `PlannedTable::columns` in plan order, keep only the columns for which `column_sql_type` returns `Some`, and map `ColumnValues::{Bool, BoolMask, Int, Double, Str}` onto `BooleanArray`, non-null `BooleanArray`, `Int64Array`, `Float64Array`, and `StringArray`. The Arrow field order must match the CREATE statement column order exactly. [expert]
-- [ ] 2.7 Implement `load` in `src/json_tables.rs`. Resolve the target schema first, per the Identifier rules: the uppercased `--table` prefix, else `conn.params().schema` uppercased, else fail before any statement runs. Run `OPEN SCHEMA` on the resolved schema, execute the CREATE statements in family order, run the second document pass into `ColumnBuffers`, then import each table with `import_from_record_batches` against its explicitly qualified name. Iterate `family.plans` for the CREATE statements, the imports, and the returned counts, and resolve each table's buffer through `ColumnBuffers::table(&plan.path)`. Never iterate `ColumnBuffers::tables()`, whose `HashMap` order is randomized per process. On a failure, return an error naming the failed table while preserving the per-table counts already collected. [expert]
-- [ ] 2.8 Replace the task 1.2a `(FileFormat::Json, false)` bail arm in `src/commands/upload.rs` with the import dispatch. Print one line per loaded table with its row count, then the family total. On failure, print the tables loaded so far to stdout before returning the error.
+- [ ] 2.7 Implement `load` in `src/json_tables.rs`. Resolve the target schema first, per the Identifier rules: the uppercased `--table` prefix, else `conn.params().schema` uppercased, else fail before any statement runs. Run `OPEN SCHEMA` on the resolved schema, execute the CREATE statements in family order, run the second document pass into `ColumnBuffers`, then import each table with `import_from_record_batches` against its explicitly qualified name. Iterate `family.plans` for the CREATE statements, the imports, and the returned counts, and resolve each table's buffer through `ColumnBuffers::table(&plan.path)`. Never iterate `ColumnBuffers::tables()`, whose `HashMap` order is randomized per process. On success, return every table's count paired with `None`. On a failure, return the counts collected so far paired with `Some(error)`. Name the failed table in that error. Write nothing to stdout. [expert]
+- [ ] 2.8 Replace the task 1.2a `(FileFormat::Json, false)` bail arm in `src/commands/upload.rs` with the import dispatch. Print one stdout line per entry of the vector `load` returns, with its row count. Print the family total after those lines. Print the same vector on the failure path, before you return the error that `load` paired with it. Keep every stdout write in `src/commands/upload.rs`. Print the `_id` warning to stderr on every JSON import, because the command does not probe the catalog for a pre-existing family.
 
 ## Parallelization
 
@@ -228,6 +229,8 @@ Group A must finish before Group B starts. The two groups are sequenced, not par
 | Extension-to-format mapping (supporting) | Unit | `src/format.rs` | `json_extension_returns_json`, `ndjson_extension_returns_json`, `uppercase_json_extension_returns_json`, `unsupported_extension_returns_error_with_supported_formats` |
 
 `partial_family_failure_reports_loaded_tables` forces its failure by creating the root table `"SALES"."ORDERS"` up front with an incompatible column list, so `"SALES"."ORDERS_items_arr"` loads and the root import fails. The sabotaged table must be the root, not a subtable, because family order sorts the root last (see § Decision). Sabotaging the first table in the order would leave nothing loaded before the failure and the scenario's stdout assertion would have nothing to assert.
+
+`repeated_run_appends_to_existing_family` runs the same import twice and asserts that the row counts double. It also asserts that the second run prints the `_id` warning to stderr. The warning is unconditional, so the first run prints it too.
 
 ### Manual Testing
 
