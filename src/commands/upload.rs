@@ -17,6 +17,8 @@ pub async fn run(args: UploadArgs) -> anyhow::Result<()> {
         (FileFormat::Parquet, false) => parquet_import(path, &args).await,
         (FileFormat::Csv, true) => csv_dry_run(path, &args),
         (FileFormat::Csv, false) => csv_import(path, &args).await,
+        (FileFormat::Json, true) => json_dry_run(path, &args.table),
+        (FileFormat::Json, false) => json_import(path, &args).await,
     }
 }
 
@@ -57,6 +59,14 @@ fn csv_dry_run(path: &std::path::Path, args: &UploadArgs) -> anyhow::Result<()> 
     let schema = exarrow_rs::types::infer_schema_from_csv(path, &options)?;
 
     print_schema(&schema, &args.table);
+
+    Ok(())
+}
+
+fn json_dry_run(path: &std::path::Path, table: &str) -> anyhow::Result<()> {
+    let family = crate::json_tables::plan_family(path, table)?;
+
+    print!("{}", family.describe());
 
     Ok(())
 }
@@ -116,6 +126,32 @@ async fn csv_import(path: &std::path::Path, args: &UploadArgs) -> anyhow::Result
         .await?;
 
     println!("Imported {rows} rows");
+
+    Ok(())
+}
+
+async fn json_import(path: &std::path::Path, args: &UploadArgs) -> anyhow::Result<()> {
+    let family = crate::json_tables::plan_family(path, &args.table)?;
+
+    let mut conn = args.conn.connect().await?;
+
+    eprintln!(
+        "Warning: _id values restart at 1 on every run, so a _parent or \"<name>|object\" value \
+         links only the rows this run loaded."
+    );
+
+    let (loaded, failure) = crate::json_tables::load(&family, path, &mut conn).await;
+
+    for (table, rows) in &loaded {
+        println!("Imported {rows} rows into {table}");
+    }
+
+    if let Some(error) = failure {
+        return Err(error);
+    }
+
+    let total: u64 = loaded.iter().map(|(_, rows)| *rows).sum();
+    println!("Imported {total} rows in total");
 
     Ok(())
 }

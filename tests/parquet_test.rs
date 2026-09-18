@@ -45,13 +45,13 @@ fn file_not_found_error() {
 #[test]
 fn unsupported_file_extension() {
     let dir = tempfile::tempdir().unwrap();
-    let json_path = dir.path().join("data.json");
-    std::fs::write(&json_path, r#"{"a":1}"#).unwrap();
+    let txt_path = dir.path().join("data.txt");
+    std::fs::write(&txt_path, "a,b\n1,2\n").unwrap();
 
     fixtures::exapump()
         .args([
             "upload",
-            json_path.to_str().unwrap(),
+            txt_path.to_str().unwrap(),
             "--table",
             "test_schema.test_table",
             "--dsn",
@@ -60,7 +60,7 @@ fn unsupported_file_extension() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("not supported"))
-        .stderr(predicate::str::contains(".parquet, .csv"));
+        .stderr(predicate::str::contains(".parquet, .csv, .json, .ndjson"));
 }
 
 #[test]
