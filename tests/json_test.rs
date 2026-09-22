@@ -786,3 +786,289 @@ async fn exasol_json_partial_family_failure_reports_loaded_tables() {
         .execute_update(&format!("DROP SCHEMA {schema} CASCADE"))
         .await;
 }
+
+#[tokio::test]
+async fn exasol_json_multi_level_nesting_creates_all_subtables() {
+    fixtures::require_exasol!();
+
+    let (mut conn, schema) = fixtures::setup_exasol_schema("EXAPUMP_JSON").await;
+    let dir = tempfile::tempdir().unwrap();
+    let json_path = fixtures::create_deeply_nested_json(dir.path());
+
+    fixtures::exapump()
+        .timeout(std::time::Duration::from_secs(60))
+        .args([
+            "upload",
+            json_path.to_str().unwrap(),
+            "--table",
+            &format!("{schema}.deep"),
+            "--dsn",
+            fixtures::DOCKER_DSN,
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(format!(
+            "Imported 1 rows into \"{schema}\".\"DEEP\""
+        )))
+        .stdout(predicate::str::contains(format!(
+            "Imported 1 rows into \"{schema}\".\"DEEP_customer\""
+        )))
+        .stdout(predicate::str::contains(format!(
+            "Imported 1 rows into \"{schema}\".\"DEEP_customer_address\""
+        )))
+        .stdout(predicate::str::contains(format!(
+            "Imported 2 rows into \"{schema}\".\"DEEP_items_arr\""
+        )))
+        .stdout(predicate::str::contains(format!(
+            "Imported 2 rows into \"{schema}\".\"DEEP_items_arr_meta\""
+        )))
+        .stdout(predicate::str::contains(format!(
+            "Imported 3 rows into \"{schema}\".\"DEEP_items_arr_tags_arr\""
+        )))
+        .stdout(predicate::str::contains("Imported 10 rows in total"));
+
+    assert_eq!(
+        fixtures::count_rows(
+            &mut conn,
+            &format!("SELECT TABLE_NAME FROM SYS.EXA_ALL_TABLES WHERE TABLE_SCHEMA = '{schema}'"),
+        )
+        .await,
+        6,
+        "expected a root table plus one subtable per nested path at every depth"
+    );
+
+    assert_eq!(
+        fixtures::count_rows(
+            &mut conn,
+            &format!(
+                "SELECT 1 FROM {schema}.\"DEEP\" d \
+                 JOIN {schema}.\"DEEP_customer\" c ON d.\"customer|object\" = c.\"_id\" \
+                 WHERE c.\"name\" = 'Ada'"
+            ),
+        )
+        .await,
+        1,
+        "customer|object must hold the _id of the matching DEEP_customer row"
+    );
+
+    assert_eq!(
+        fixtures::count_rows(
+            &mut conn,
+            &format!(
+                "SELECT 1 FROM {schema}.\"DEEP_customer\" c \
+                 JOIN {schema}.\"DEEP_customer_address\" a ON c.\"address|object\" = a.\"_id\" \
+                 WHERE a.\"city\" = 'Berlin'"
+            ),
+        )
+        .await,
+        1,
+        "address|object must hold the _id of the matching DEEP_customer_address row"
+    );
+
+    assert_eq!(
+        fixtures::count_rows(
+            &mut conn,
+            &format!(
+                "SELECT 1 FROM {schema}.\"DEEP_items_arr\" i \
+                 JOIN {schema}.\"DEEP\" d ON i.\"_parent\" = d.\"_id\""
+            ),
+        )
+        .await,
+        2,
+        "_parent must link both item rows back to the root row"
+    );
+
+    assert_eq!(
+        fixtures::count_rows(
+            &mut conn,
+            &format!(
+                "SELECT 1 FROM {schema}.\"DEEP_items_arr\" i \
+                 JOIN {schema}.\"DEEP_items_arr_meta\" m ON i.\"meta|object\" = m.\"_id\" \
+                 WHERE i.\"sku\" = 'A1' AND m.\"warehouse\" = 'W1'"
+            ),
+        )
+        .await,
+        1,
+        "meta|object must hold the _id of the matching DEEP_items_arr_meta row"
+    );
+
+    assert_eq!(
+        fixtures::count_rows(
+            &mut conn,
+            &format!(
+                "SELECT 1 FROM {schema}.\"DEEP_items_arr_tags_arr\" t \
+                 JOIN {schema}.\"DEEP_items_arr\" i ON t.\"_parent\" = i.\"_id\" \
+                 WHERE i.\"sku\" = 'A1'"
+            ),
+        )
+        .await,
+        2,
+        "item A1 must have its 2 tags linked by _parent"
+    );
+
+    assert_eq!(
+        fixtures::count_rows(
+            &mut conn,
+            &format!(
+                "SELECT 1 FROM {schema}.\"DEEP_items_arr_tags_arr\" t \
+                 JOIN {schema}.\"DEEP_items_arr\" i ON t.\"_parent\" = i.\"_id\" \
+                 WHERE i.\"sku\" = 'B2'"
+            ),
+        )
+        .await,
+        1,
+        "item B2 must have its 1 tag linked by _parent"
+    );
+
+    let _ = conn
+        .execute_update(&format!("DROP SCHEMA {schema} CASCADE"))
+        .await;
+}
+
+#[tokio::test]
+async fn exasol_json_array_of_arrays_creates_nested_subtables() {
+    fixtures::require_exasol!();
+
+    let (mut conn, schema) = fixtures::setup_exasol_schema("EXAPUMP_JSON").await;
+    let dir = tempfile::tempdir().unwrap();
+    let json_path = fixtures::create_array_of_arrays_json(dir.path());
+
+    fixtures::exapump()
+        .timeout(std::time::Duration::from_secs(60))
+        .args([
+            "upload",
+            json_path.to_str().unwrap(),
+            "--table",
+            &format!("{schema}.mat"),
+            "--dsn",
+            fixtures::DOCKER_DSN,
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(format!(
+            "Imported 2 rows into \"{schema}\".\"MAT\""
+        )))
+        .stdout(predicate::str::contains(format!(
+            "Imported 3 rows into \"{schema}\".\"MAT_matrix_arr\""
+        )))
+        .stdout(predicate::str::contains(format!(
+            "Imported 6 rows into \"{schema}\".\"MAT_matrix_arr_value_arr\""
+        )))
+        .stdout(predicate::str::contains("Imported 11 rows in total"));
+
+    assert_eq!(
+        fixtures::count_rows(
+            &mut conn,
+            &format!("SELECT TABLE_NAME FROM SYS.EXA_ALL_TABLES WHERE TABLE_SCHEMA = '{schema}'"),
+        )
+        .await,
+        3,
+        "expected a root table plus one subtable per array-nesting depth"
+    );
+
+    assert_eq!(
+        fixtures::count_rows(
+            &mut conn,
+            &format!("SELECT 1 FROM {schema}.\"MAT\" WHERE \"id\" = 1 AND \"matrix|array\" = 2")
+        )
+        .await,
+        1,
+        "matrix|array on id=1 must report its 2 sub-arrays"
+    );
+    assert_eq!(
+        fixtures::count_rows(
+            &mut conn,
+            &format!("SELECT 1 FROM {schema}.\"MAT\" WHERE \"id\" = 2 AND \"matrix|array\" = 1")
+        )
+        .await,
+        1,
+        "matrix|array on id=2 must report its 1 sub-array"
+    );
+
+    assert_eq!(
+        fixtures::count_rows(
+            &mut conn,
+            &format!(
+                "SELECT 1 FROM {schema}.\"MAT_matrix_arr\" a \
+                 JOIN {schema}.\"MAT\" m ON a.\"_parent\" = m.\"_id\" \
+                 WHERE m.\"id\" = 1 AND a.\"_pos\" = 0 AND a.\"_value|array\" = 2"
+            ),
+        )
+        .await,
+        1,
+        "the [1,2] sub-array (id=1, pos=0) must report 2 leaf values"
+    );
+    assert_eq!(
+        fixtures::count_rows(
+            &mut conn,
+            &format!(
+                "SELECT 1 FROM {schema}.\"MAT_matrix_arr\" a \
+                 JOIN {schema}.\"MAT\" m ON a.\"_parent\" = m.\"_id\" \
+                 WHERE m.\"id\" = 1 AND a.\"_pos\" = 1 AND a.\"_value|array\" = 3"
+            ),
+        )
+        .await,
+        1,
+        "the [3,4,5] sub-array (id=1, pos=1) must report 3 leaf values"
+    );
+    assert_eq!(
+        fixtures::count_rows(
+            &mut conn,
+            &format!(
+                "SELECT 1 FROM {schema}.\"MAT_matrix_arr\" a \
+                 JOIN {schema}.\"MAT\" m ON a.\"_parent\" = m.\"_id\" \
+                 WHERE m.\"id\" = 2 AND a.\"_pos\" = 0 AND a.\"_value|array\" = 1"
+            ),
+        )
+        .await,
+        1,
+        "the [6] sub-array (id=2, pos=0) must report 1 leaf value"
+    );
+
+    assert_eq!(
+        fixtures::count_rows(
+            &mut conn,
+            &format!(
+                "SELECT 1 FROM {schema}.\"MAT_matrix_arr_value_arr\" v \
+                 JOIN {schema}.\"MAT_matrix_arr\" a ON v.\"_parent\" = a.\"_id\" \
+                 JOIN {schema}.\"MAT\" m ON a.\"_parent\" = m.\"_id\" \
+                 WHERE m.\"id\" = 1 AND a.\"_pos\" = 0"
+            ),
+        )
+        .await,
+        2,
+        "the [1,2] sub-array must have 2 leaf value rows linked by _parent"
+    );
+    assert_eq!(
+        fixtures::count_rows(
+            &mut conn,
+            &format!(
+                "SELECT 1 FROM {schema}.\"MAT_matrix_arr_value_arr\" v \
+                 JOIN {schema}.\"MAT_matrix_arr\" a ON v.\"_parent\" = a.\"_id\" \
+                 JOIN {schema}.\"MAT\" m ON a.\"_parent\" = m.\"_id\" \
+                 WHERE m.\"id\" = 1 AND a.\"_pos\" = 1"
+            ),
+        )
+        .await,
+        3,
+        "the [3,4,5] sub-array must have 3 leaf value rows linked by _parent"
+    );
+    assert_eq!(
+        fixtures::count_rows(
+            &mut conn,
+            &format!(
+                "SELECT 1 FROM {schema}.\"MAT_matrix_arr_value_arr\" v \
+                 JOIN {schema}.\"MAT_matrix_arr\" a ON v.\"_parent\" = a.\"_id\" \
+                 JOIN {schema}.\"MAT\" m ON a.\"_parent\" = m.\"_id\" \
+                 WHERE m.\"id\" = 2"
+            ),
+        )
+        .await,
+        1,
+        "the [6] sub-array must have 1 leaf value row linked by _parent"
+    );
+
+    let _ = conn
+        .execute_update(&format!("DROP SCHEMA {schema} CASCADE"))
+        .await;
+}

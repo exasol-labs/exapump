@@ -373,3 +373,43 @@ pub fn create_all_empty_arrays_json(dir: &std::path::Path) -> PathBuf {
         "[{\"id\": 1, \"items\": []}, {\"id\": 2, \"items\": []}]\n",
     )
 }
+
+/// Creates `dir/deep.json`: multiple levels of nesting — an object nested
+/// inside an object (`customer.address`), and an object plus an array nested
+/// inside each element of an array (`items[].meta`, `items[].tags`).
+#[allow(dead_code)]
+pub fn create_deeply_nested_json(dir: &std::path::Path) -> PathBuf {
+    write_fixture(
+        dir,
+        "deep.json",
+        r#"[
+  {
+    "order_id": 1,
+    "customer": {
+      "name": "Ada",
+      "address": {"city": "Berlin", "zip": "10115"}
+    },
+    "items": [
+      {"sku": "A1", "qty": 2, "meta": {"warehouse": "W1"}, "tags": ["red", "large"]},
+      {"sku": "B2", "qty": 1, "meta": {"warehouse": "W2"}, "tags": ["blue"]}
+    ]
+  }
+]
+"#,
+    )
+}
+
+/// Creates `dir/matrix.json`: an array nested inside each element of another
+/// array (`matrix[][]`), with varying sub-array lengths.
+#[allow(dead_code)]
+pub fn create_array_of_arrays_json(dir: &std::path::Path) -> PathBuf {
+    write_fixture(
+        dir,
+        "matrix.json",
+        r#"[
+  {"id": 1, "matrix": [[1, 2], [3, 4, 5]]},
+  {"id": 2, "matrix": [[6]]}
+]
+"#,
+    )
+}
