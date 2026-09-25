@@ -45,10 +45,16 @@ The upload command is available as `exapump upload`. Connection arguments are pr
 
 ### Scenario: CSV flags ignored for Parquet files
 
-* *GIVEN* a Parquet file exists at the specified path
+* *GIVEN* a Parquet, JSON, or NDJSON file exists at the specified path
 * *WHEN* the user runs `exapump upload <file> --table <table> --delimiter ';'`
 * *THEN* the command MUST ignore the `--delimiter` flag
-* *AND* the command MUST proceed with Parquet import as normal
+* *AND* the command MUST proceed with the import for the detected format as normal
+
+### Scenario: Upload help describes the table family for JSON input
+
+* *GIVEN* exapump is installed
+* *WHEN* the user runs `exapump upload --help`
+* *THEN* the `--table` option description MUST state that JSON input creates a root table plus one subtable per nested path
 
 ### Scenario: CSV flags shown with defaults in help
 

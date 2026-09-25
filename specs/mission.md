@@ -27,7 +27,7 @@ There is no simple `command -> done` workflow for these common cases. Every opti
 
 ## Core Capabilities
 
-1. **Single-command upload** — load CSV or Parquet files into an Exasol table with one command
+1. **Single-command upload** — load CSV, Parquet, JSON, or NDJSON files into an Exasol table with one command; JSON and NDJSON input creates a root table plus one subtable per nested object or array path
 2. **Auto table creation** — infer schema from file metadata/sampling and create the target table if it doesn't exist
 3. **Glob and directory support** — load all matching files from a path pattern in a single invocation
 4. **Parallel multi-file import** — leverage exarrow-rs parallel connections for high-throughput transfer
@@ -68,6 +68,7 @@ Standard Exasol and Arrow terminology applies. No project-specific redefinitions
 | Language | Rust | Systems language for single-binary distribution |
 | CLI framework | clap (derive) | Argument parsing and help generation |
 | Core library | exarrow-rs (crates.io) | Exasol connectivity, Arrow-native import/export, schema inference, parallel transfer, SQL execution |
+| JSON normalization | json_tables_core (git, exasol-labs/exasol-json-tables, tag v0.3) | Parses JSON/NDJSON, infers a relational table family from nested documents, and emits Exasol DDL |
 | Testing | cargo test | Built-in unit and integration tests |
 
 ## Commands
