@@ -10,6 +10,8 @@ Normalization is performed by the `json_tables_core` crate from `exasol-labs/exa
 
 `--table <name>` names the root table and supplies the base name for every subtable. Every table of a family is created and loaded in one resolved schema. When `--table` carries a schema part, that part supplies it. When `--table` carries no schema part, the connection's default schema supplies it. When neither supplies one, the command fails before creating any table.
 
+Resolving a schema name and opening it are two separate steps with two separate failures. A name that no rule supplies fails during resolution. A resolved name that Exasol does not hold fails when the command opens the schema.
+
 Rows are imported per table over `exarrow_rs::Connection::import_from_record_batches`. The import is not atomic across the table family. A failure partway through leaves the tables already loaded in place.
 
 ## Scenarios
@@ -22,6 +24,15 @@ Rows are imported per table over `exarrow_rs::Connection::import_from_record_bat
 * *THEN* the command MUST exit with a non-zero code
 * *AND* stderr MUST state that no target schema could be resolved
 * *AND* the command MUST NOT create any table
+
+### Scenario: Qualified table name whose schema does not exist
+
+* *GIVEN* a file `orders.json` exists
+* *AND* Exasol holds no schema named `NO_SUCH_SCHEMA_XYZ`
+* *WHEN* the user runs `exapump upload orders.json --table NO_SUCH_SCHEMA_XYZ.orders --dsn <dsn>`
+* *THEN* the command MUST exit with a non-zero code
+* *AND* stderr MUST state that it failed to open the schema
+* *AND* stderr MUST name the schema `NO_SUCH_SCHEMA_XYZ`
 
 ### Scenario: Import failure reports the tables already loaded
 

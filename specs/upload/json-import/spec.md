@@ -1,6 +1,6 @@
 # Feature: JSON Import
 
-Upload a JSON or NDJSON file into Exasol as a relational table family. A flat document set becomes one table. A document set with nested objects and arrays becomes a root table plus one subtable per nested path, linked by generated key columns.
+Upload a JSON or NDJSON file into Exasol as a relational table family. A flat document set becomes one table with one column per scalar property. This feature covers file framing, dry-run preview, scalar column typing, and repeated runs. Fan-out of nested objects and arrays into subtables, and the generated key columns that link them, are covered by the sibling feature `upload/json-import-nesting`.
 
 ## Background
 
@@ -12,7 +12,7 @@ Framing is detected from the first non-whitespace byte of the file, not from the
 
 The document set is read twice. The first pass collects property and type statistics and derives the table family. The second pass writes rows into in-memory column buffers.
 
-`--table <name>` names the root table and supplies the base name for every subtable. exapump uppercases the schema part and the table part of `--table`, then quotes both, so one `--table` value names the same root table for JSON, CSV, and Parquet input. A subtable name is the uppercased root table name, an underscore, and the encoded JSON path, with array segments suffixed `_arr`. The path segment keeps the JSON key case, because two JSON keys may differ only by case. `--table sales.orders` with a document property `items` holding an array therefore yields `"SALES"."ORDERS"` and `"SALES"."ORDERS_items_arr"`.
+`--table <name>` names the root table and supplies the base name for every subtable. exapump uppercases the schema part and the table part of `--table`, then quotes both, so one `--table` value names the same root table for JSON, CSV, and Parquet input. Subtable naming for nested paths, and the array fan-out that produces them, is covered by the sibling feature `upload/json-import-nesting`.
 
 Every table of a family is created and loaded in one resolved schema. When `--table` carries a schema part, that part supplies it. When `--table` carries no schema part, the connection's default schema supplies it. When neither supplies one, the command fails before creating any table. Under `--dry-run` there is no connection, so an unqualified `--table` previews unqualified table names.
 
@@ -27,15 +27,11 @@ Column typing follows the `json_tables_core` contract:
 
 A property whose values carry more than one scalar type gets a primary column for the majority type and one `<name>|<type>` sibling column per remaining type. The type token is the `json_tables_core` type label, for example `integer` or `string`. A property that appears as an explicit JSON `null` in at least one document gets a `<name>|n` boolean mask column, so an explicit null stays distinguishable from an absent field.
 
-Generated key columns link the family. Every object table carries `_id`, including the root table of a flat document set that has no children. An array element table carries `_parent` and `_pos`, and carries `_id` only when it holds a nested array of its own. A parent of a nested object carries a `<name>|object` column holding the child row's `_id`.
-
 The command creates, loads, and reports the tables of a family in a deterministic order derived from the table path, so two runs over the same input report the same table order.
 
 All tables are created with `CREATE TABLE IF NOT EXISTS`, so a repeated run against the same target loads into the existing family. Primary-key and foreign-key constraint statements are out of scope for this feature.
 
 Limit: generated `_id` values repeat across runs. `json_tables_core` restarts the `_id` counter at 1 on every run, so an `_id` value is unique only within one run. A `_parent` value therefore resolves only against the rows that the same run wrote. The command prints this limit as a warning on stderr on every import.
-
-Rows are imported per table over `exarrow_rs::Connection::import_from_record_batches`. The import is not atomic across the table family. A failure partway through leaves the tables already loaded in place.
 
 The whole family is buffered in memory before the import starts. A top-level JSON array is also parsed as one value. Peak memory therefore scales with the file size, and NDJSON framing is the shape to prefer for a large input because it streams the read pass. This feature adds no chunking or spill-to-disk.
 
@@ -51,23 +47,6 @@ Rejection of malformed or empty input, and reporting of a failure partway throug
 * *THEN* the command MUST create exactly one table `"SALES"."ORDERS"`, carrying an `_id` column plus one column per JSON property typed per the contract table in Background
 * *AND* the command MUST import one row per document
 * *AND* the command MUST print the row count loaded for `"SALES"."ORDERS"` and exit with code 0
-
-### Scenario: Import nested JSON creates a subtable per nested path
-
-* *GIVEN* a file `orders.json` holds documents with a nested object property `customer` and a nested array property `items`
-* *AND* no target table exists in Exasol
-* *WHEN* the user runs `exapump upload orders.json --table sales.orders --dsn <dsn>`
-* *THEN* the command MUST create the tables `"SALES"."ORDERS"`, `"SALES"."ORDERS_customer"`, and `"SALES"."ORDERS_items_arr"`
-* *AND* the command MUST import every nested object and every array element into its own subtable
-* *AND* the command MUST print the row count loaded for each table and exit with code 0
-
-### Scenario: Nested tables carry the generated key columns
-
-* *GIVEN* a file `orders.json` holds documents with a nested object property `customer` and a nested array property `items`
-* *WHEN* the user runs `exapump upload orders.json --table sales.orders --dsn <dsn>`
-* *THEN* `"SALES"."ORDERS"` MUST carry a `"customer|object"` column holding the `_id` of the matching `"SALES"."ORDERS_customer"` row
-* *AND* `"SALES"."ORDERS_items_arr"` MUST carry a `_parent` column holding the `_id` of its parent row
-* *AND* `"SALES"."ORDERS_items_arr"` MUST carry a `_pos` column holding the zero-based element position
 
 ### Scenario: Import an NDJSON file
 
