@@ -3,6 +3,7 @@ mod commands;
 mod config;
 mod connection;
 mod format;
+mod json_tables;
 mod size;
 mod split;
 

@@ -66,7 +66,9 @@ pub struct UploadArgs {
     #[arg(required = true)]
     pub files: Vec<String>,
 
-    /// Target table name (e.g., schema.table)
+    /// Target table name (e.g., schema.table). For JSON or NDJSON input, this
+    /// names the root table; exapump creates one subtable per nested object or
+    /// array path found in the documents.
     #[arg(short, long)]
     pub table: String,
 

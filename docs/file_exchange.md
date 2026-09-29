@@ -34,6 +34,21 @@ exapump upload part-*.parquet --table my_schema.events
 exapump upload data.csv --table my_schema.events --dry-run
 ```
 
+### JSON and NDJSON
+
+Upload a JSON or NDJSON file. exapump accepts the extensions `.json`, `.ndjson`, and `.jsonl`.
+
+```bash
+exapump upload orders.json --table sales.orders
+exapump upload events.ndjson --table raw.events
+```
+
+The extension does not select the framing. exapump looks at the first non-whitespace byte of the file: a leading `[` reads it as a single top-level JSON array of objects, and any other leading byte reads it as NDJSON, one JSON object per line. All three extensions accept either framing. A single JSON object spread across multiple lines matches neither shape and is not supported.
+
+A flat document set becomes one table, with one column per scalar property. A nested object or array property fans out into its own subtable per nested path, linked back to its parent by generated key columns.
+
+exapump buffers the whole document set in memory before the import starts, so peak memory scales with the file size. NDJSON is the framing to prefer for a large file, because exapump never parses the whole file into one value. This feature adds no chunking and no spill to disk.
+
 ---
 
 ## Export

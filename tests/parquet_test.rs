@@ -45,13 +45,13 @@ fn file_not_found_error() {
 #[test]
 fn unsupported_file_extension() {
     let dir = tempfile::tempdir().unwrap();
-    let json_path = dir.path().join("data.json");
-    std::fs::write(&json_path, r#"{"a":1}"#).unwrap();
+    let txt_path = dir.path().join("data.txt");
+    std::fs::write(&txt_path, "a,b\n1,2\n").unwrap();
 
     fixtures::exapump()
         .args([
             "upload",
-            json_path.to_str().unwrap(),
+            txt_path.to_str().unwrap(),
             "--table",
             "test_schema.test_table",
             "--dsn",
@@ -60,7 +60,9 @@ fn unsupported_file_extension() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("not supported"))
-        .stderr(predicate::str::contains(".parquet, .csv"));
+        .stderr(predicate::str::contains(
+            ".parquet, .csv, .json, .ndjson, .jsonl",
+        ));
 }
 
 #[test]
@@ -123,10 +125,6 @@ async fn exasol_parquet_import_to_existing_table() {
     let batches = rs.fetch_all().await.unwrap();
     let row_count: usize = batches.iter().map(|b| b.num_rows()).sum();
     assert_eq!(row_count, 3, "expected 3 rows in UPLOAD_EXISTING");
-
-    let _ = conn
-        .execute_update(&format!("DROP SCHEMA {schema_name} CASCADE"))
-        .await;
 }
 
 #[tokio::test]
@@ -162,10 +160,6 @@ async fn exasol_parquet_import_with_auto_table_creation() {
     let batches = rs.fetch_all().await.unwrap();
     let row_count: usize = batches.iter().map(|b| b.num_rows()).sum();
     assert_eq!(row_count, 3, "expected 3 rows in AUTO_CREATED");
-
-    let _ = conn
-        .execute_update(&format!("DROP SCHEMA {schema_name} CASCADE"))
-        .await;
 }
 
 #[test]
@@ -222,8 +216,4 @@ async fn exasol_parquet_import_with_reserved_keyword_column() {
     let batches = rs.fetch_all().await.unwrap();
     let row_count: usize = batches.iter().map(|b| b.num_rows()).sum();
     assert_eq!(row_count, 3, "expected 3 rows in RESERVED_KW");
-
-    let _ = conn
-        .execute_update(&format!("DROP SCHEMA {schema_name} CASCADE"))
-        .await;
 }

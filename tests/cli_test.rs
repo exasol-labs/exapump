@@ -64,6 +64,17 @@ fn upload_help_shows_all_arguments() {
 }
 
 #[test]
+fn upload_help_documents_json_subtable_creation() {
+    fixtures::exapump()
+        .args(["upload", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "For JSON or NDJSON input, this names the root table; exapump creates one subtable per nested object or array path",
+        ));
+}
+
+#[test]
 fn csv_flags_shown_with_defaults_in_help() {
     fixtures::exapump()
         .args(["upload", "--help"])
@@ -324,10 +335,6 @@ async fn sql_execute_script_with_returns_table_displays_rows() {
         .success()
         .stderr(predicate::str::contains("1 rows"))
         .stdout(predicate::str::contains("42"));
-
-    conn.execute_update(&format!("DROP SCHEMA IF EXISTS {schema_upper} CASCADE"))
-        .await
-        .unwrap();
 }
 
 #[tokio::test]
@@ -355,10 +362,6 @@ async fn sql_execute_script_without_returns_table_displays_ok() {
         .success()
         .stderr(predicate::str::contains("OK"))
         .stdout(predicate::str::is_empty());
-
-    conn.execute_update(&format!("DROP SCHEMA IF EXISTS {schema_upper} CASCADE"))
-        .await
-        .unwrap();
 }
 
 // --- Export subcommand tests ---
@@ -917,10 +920,6 @@ async fn repl_execute_script_with_returns_table_displays_rows() {
         .assert()
         .success()
         .stdout(predicate::str::contains("42"));
-
-    conn.execute_update(&format!("DROP SCHEMA IF EXISTS {schema_upper} CASCADE"))
-        .await
-        .unwrap();
 }
 
 #[tokio::test]
@@ -941,8 +940,4 @@ async fn repl_execute_script_without_returns_table_displays_ok() {
         .assert()
         .success()
         .stdout(predicate::str::contains("OK"));
-
-    conn.execute_update(&format!("DROP SCHEMA IF EXISTS {schema_upper} CASCADE"))
-        .await
-        .unwrap();
 }

@@ -1,3 +1,5 @@
+use std::fmt;
+use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -97,9 +99,67 @@ macro_rules! require_bucketfs {
 #[allow(unused_imports)]
 pub(crate) use require_bucketfs;
 
-/// Creates a unique schema in Exasol and returns the connection and schema name.
+/// Owns a schema created for one test and drops it when the test is done.
+///
+/// Cleanup runs even while a failed assertion unwinds the test's own async
+/// task: the `Drop` impl spawns a dedicated OS thread with its own
+/// current-thread Tokio runtime to issue `DROP SCHEMA ... CASCADE`, rather
+/// than reusing `tokio::runtime::Handle::block_on` (which panics when called
+/// from inside a runtime thread, exactly the context an unwinding test is
+/// in). Every failure along that path — opening the connection, running the
+/// drop, joining the thread — is discarded instead of propagated: a panic
+/// inside `Drop` during an unwind aborts the whole test process and hides
+/// the original assertion failure.
 #[allow(dead_code)]
-pub async fn setup_exasol_schema(prefix: &str) -> (exarrow_rs::Connection, String) {
+pub struct SchemaGuard {
+    name: String,
+}
+
+impl fmt::Display for SchemaGuard {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.name)
+    }
+}
+
+impl Deref for SchemaGuard {
+    type Target = str;
+
+    fn deref(&self) -> &str {
+        &self.name
+    }
+}
+
+impl Drop for SchemaGuard {
+    fn drop(&mut self) {
+        let name = self.name.clone();
+        let handle = std::thread::spawn(move || {
+            let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            else {
+                return;
+            };
+            runtime.block_on(async {
+                let driver = exarrow_rs::Driver::new();
+                let Ok(db) = driver.open(DOCKER_DSN) else {
+                    return;
+                };
+                let Ok(mut conn) = db.connect().await else {
+                    return;
+                };
+                let _ = conn
+                    .execute_update(&format!("DROP SCHEMA {name} CASCADE"))
+                    .await;
+            });
+        });
+        let _ = handle.join();
+    }
+}
+
+/// Creates a unique schema in Exasol and returns the connection and a guard
+/// that drops the schema when the test is done.
+#[allow(dead_code)]
+pub async fn setup_exasol_schema(prefix: &str) -> (exarrow_rs::Connection, SchemaGuard) {
     install_crypto_provider();
     let seq = SCHEMA_COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     let schema_name = format!(
@@ -116,7 +176,24 @@ pub async fn setup_exasol_schema(prefix: &str) -> (exarrow_rs::Connection, Strin
     conn.execute_update(&format!("CREATE SCHEMA IF NOT EXISTS {schema_name}"))
         .await
         .unwrap();
-    (conn, schema_name)
+    (conn, SchemaGuard { name: schema_name })
+}
+
+/// Runs `sql` and returns how many rows the result holds.
+///
+/// Lets a test state its expectation as a predicate the database evaluates,
+/// so no assertion has to decode Arrow values out of the result set.
+#[allow(dead_code)]
+pub async fn count_rows(conn: &mut exarrow_rs::Connection, sql: &str) -> usize {
+    let result = conn
+        .execute(sql)
+        .await
+        .unwrap_or_else(|e| panic!("query failed: {sql}: {e}"));
+    let batches = result
+        .fetch_all()
+        .await
+        .unwrap_or_else(|e| panic!("fetch failed: {sql}: {e}"));
+    batches.iter().map(|b| b.num_rows()).sum()
 }
 
 pub fn exapump() -> Command {
@@ -211,4 +288,280 @@ pub fn create_csv_with_content(dir: &std::path::Path, filename: &str, content: &
     let path = dir.join(filename);
     std::fs::write(&path, content).unwrap();
     path
+}
+
+/// Writes `content` to `dir/{filename}` and returns the path.
+fn write_fixture(dir: &std::path::Path, filename: &str, content: &str) -> PathBuf {
+    let path = dir.join(filename);
+    std::fs::write(&path, content).unwrap();
+    path
+}
+
+/// Creates `dir/orders.json`: a top-level array of three objects whose
+/// properties cover every scalar type of the contract.
+#[allow(dead_code)]
+pub fn create_flat_json(dir: &std::path::Path) -> PathBuf {
+    write_fixture(
+        dir,
+        "orders.json",
+        r#"[
+  {"id": 1, "name": "Alice", "score": 95.5, "active": true},
+  {"id": 2, "name": "Bob", "score": 87.25, "active": false},
+  {"id": 3, "name": "Charlie", "score": 92.5, "active": true}
+]
+"#,
+    )
+}
+
+/// Creates `dir/orders.json`: documents carrying a nested object property
+/// `customer` and a nested array property `items`.
+///
+/// Both nested path names sort before the literal `root`, so the root table is
+/// last in family order.
+#[allow(dead_code)]
+pub fn create_nested_json(dir: &std::path::Path) -> PathBuf {
+    write_fixture(
+        dir,
+        "orders.json",
+        r#"[
+  {"id": 1, "customer": {"name": "Alice", "tier": "gold"},
+   "items": [{"sku": "A1", "qty": 2}, {"sku": "A2", "qty": 1}]},
+  {"id": 2, "customer": {"name": "Bob", "tier": "silver"},
+   "items": [{"sku": "B1", "qty": 5}]}
+]
+"#,
+    )
+}
+
+/// Creates `dir/events.ndjson`: three documents, one per line, with one blank
+/// line between them.
+#[allow(dead_code)]
+pub fn create_ndjson(dir: &std::path::Path) -> PathBuf {
+    write_fixture(
+        dir,
+        "events.ndjson",
+        "{\"id\": 1, \"kind\": \"click\"}\n\n{\"id\": 2, \"kind\": \"view\"}\n{\"id\": 3, \"kind\": \"click\"}\n",
+    )
+}
+
+/// Creates `dir/events.json`: NDJSON framing behind a `.json` extension, so
+/// framing detection cannot rely on the extension.
+#[allow(dead_code)]
+pub fn create_ndjson_in_json_file(dir: &std::path::Path) -> PathBuf {
+    write_fixture(
+        dir,
+        "events.json",
+        "{\"id\": 1, \"kind\": \"click\"}\n{\"id\": 2, \"kind\": \"view\"}\n{\"id\": 3, \"kind\": \"click\"}\n",
+    )
+}
+
+/// Creates `dir/mixed.json`: the property `code` is a string in three documents
+/// and an integer in the fourth.
+#[allow(dead_code)]
+pub fn create_mixed_scalar_json(dir: &std::path::Path) -> PathBuf {
+    write_fixture(
+        dir,
+        "mixed.json",
+        r#"[
+  {"code": "A1"},
+  {"code": "B2"},
+  {"code": "C3"},
+  {"code": 42}
+]
+"#,
+    )
+}
+
+/// Creates `dir/nulls.json`: `note` is an explicit JSON null in the first
+/// document and absent from the second.
+#[allow(dead_code)]
+pub fn create_explicit_null_json(dir: &std::path::Path) -> PathBuf {
+    write_fixture(
+        dir,
+        "nulls.json",
+        r#"[
+  {"id": 1, "note": null},
+  {"id": 2}
+]
+"#,
+    )
+}
+
+/// Creates `dir/empty.json`: whitespace only, no document bytes at all.
+#[allow(dead_code)]
+pub fn create_empty_json(dir: &std::path::Path) -> PathBuf {
+    write_fixture(dir, "empty.json", "  \n\t\n")
+}
+
+/// Creates `dir/none.json`: a well-formed top-level array holding no document.
+#[allow(dead_code)]
+pub fn create_empty_array_json(dir: &std::path::Path) -> PathBuf {
+    write_fixture(dir, "none.json", "[]\n")
+}
+
+/// Creates `dir/blank.json`: every array entry is an object carrying no
+/// property, so the planned family holds generated key columns only.
+#[allow(dead_code)]
+pub fn create_empty_objects_json(dir: &std::path::Path) -> PathBuf {
+    write_fixture(dir, "blank.json", "[{}, {}, {}]\n")
+}
+
+/// Creates `dir/scalars.json`: the third array entry is the number `42` rather
+/// than an object.
+#[allow(dead_code)]
+pub fn create_non_object_entry_json(dir: &std::path::Path) -> PathBuf {
+    write_fixture(
+        dir,
+        "scalars.json",
+        r#"[
+  {"a": 1},
+  {"a": 2},
+  42
+]
+"#,
+    )
+}
+
+/// Creates `dir/orders.json`: the array property `items` is present in every
+/// document and empty in every document, so its subtable is planned from the
+/// property alone and carries the generated key columns only.
+#[allow(dead_code)]
+pub fn create_all_empty_arrays_json(dir: &std::path::Path) -> PathBuf {
+    write_fixture(
+        dir,
+        "orders.json",
+        "[{\"id\": 1, \"items\": []}, {\"id\": 2, \"items\": []}]\n",
+    )
+}
+
+/// Creates `dir/deep.json`: multiple levels of nesting — an object nested
+/// inside an object (`customer.address`), and an object plus an array nested
+/// inside each element of an array (`items[].meta`, `items[].tags`).
+#[allow(dead_code)]
+pub fn create_deeply_nested_json(dir: &std::path::Path) -> PathBuf {
+    write_fixture(
+        dir,
+        "deep.json",
+        r#"[
+  {
+    "order_id": 1,
+    "customer": {
+      "name": "Ada",
+      "address": {"city": "Berlin", "zip": "10115"}
+    },
+    "items": [
+      {"sku": "A1", "qty": 2, "meta": {"warehouse": "W1"}, "tags": ["red", "large"]},
+      {"sku": "B2", "qty": 1, "meta": {"warehouse": "W2"}, "tags": ["blue"]}
+    ]
+  }
+]
+"#,
+    )
+}
+
+/// Creates `dir/first.json` and `dir/second.json`: both documents name the
+/// properties `a` and `b`, in the opposite order.
+///
+/// `serde_json` preserves property order and `json_tables_core` plans columns in
+/// first-seen order, so the two files plan the same two columns in opposite
+/// positions. Both values are strings, so an import that places values by
+/// position swaps them without failing.
+#[allow(dead_code)]
+pub fn create_reordered_property_files(dir: &std::path::Path) -> (PathBuf, PathBuf) {
+    (
+        write_fixture(dir, "first.json", "[{\"a\": \"x\", \"b\": \"y\"}]\n"),
+        write_fixture(dir, "second.json", "[{\"b\": \"y2\", \"a\": \"x2\"}]\n"),
+    )
+}
+
+/// Creates `dir/first.json` and `dir/second.json`: the second names a property
+/// `c` that the first never names, so the table the first file creates holds no
+/// column `c`.
+#[allow(dead_code)]
+pub fn create_unknown_column_files(dir: &std::path::Path) -> (PathBuf, PathBuf) {
+    (
+        write_fixture(dir, "first.json", "[{\"a\": 1, \"b\": \"from_b\"}]\n"),
+        write_fixture(dir, "second.json", "[{\"a\": 2, \"c\": \"from_c\"}]\n"),
+    )
+}
+
+/// Creates `dir/first.json` and `dir/second.json`: the second omits the
+/// property `b` that the first names, so the table holds a column the second
+/// file never writes to.
+#[allow(dead_code)]
+pub fn create_omitted_column_files(dir: &std::path::Path) -> (PathBuf, PathBuf) {
+    (
+        write_fixture(
+            dir,
+            "first.json",
+            "[{\"a\": 1, \"b\": \"x\"}, {\"a\": 2, \"b\": \"y\"}]\n",
+        ),
+        write_fixture(dir, "second.json", "[{\"a\": 3}]\n"),
+    )
+}
+
+/// Creates `dir/matrix.json`: an array nested inside each element of another
+/// array (`matrix[][]`), with varying sub-array lengths.
+#[allow(dead_code)]
+pub fn create_array_of_arrays_json(dir: &std::path::Path) -> PathBuf {
+    write_fixture(
+        dir,
+        "matrix.json",
+        r#"[
+  {"id": 1, "matrix": [[1, 2], [3, 4, 5]]},
+  {"id": 2, "matrix": [[6]]}
+]
+"#,
+    )
+}
+
+/// Creates `dir/ids.json`: one document whose `id` is a 19-digit integer, which
+/// is inside the 64-bit signed range but outside `DECIMAL(18,0)`.
+#[allow(dead_code)]
+pub fn create_wide_integer_json(dir: &std::path::Path) -> PathBuf {
+    write_fixture(dir, "ids.json", "[{\"id\": 1234567890123456789}]\n")
+}
+
+/// Creates `dir/clash.json`: the nested path `customer.address` and the
+/// top-level property `customer_address` produce the same planned table name.
+#[allow(dead_code)]
+pub fn create_colliding_paths_json(dir: &std::path::Path) -> PathBuf {
+    write_fixture(
+        dir,
+        "clash.json",
+        "[{\"customer\": {\"address\": {\"city\": \"B\"}}, \"customer_address\": {\"zip\": \"1\"}}]\n",
+    )
+}
+
+/// Creates `dir/hollow.json`: the property `a` is an object carrying no
+/// property, so the root table holds only `_id` and the generated `"a|object"`
+/// link column, and the subtable holds only `_id`.
+#[allow(dead_code)]
+pub fn create_hollow_object_json(dir: &std::path::Path) -> PathBuf {
+    write_fixture(dir, "hollow.json", "[{\"a\": {}}]\n")
+}
+
+/// Creates `dir/events.jsonl`: three documents, one per line, behind the
+/// `.jsonl` extension.
+#[allow(dead_code)]
+pub fn create_jsonl(dir: &std::path::Path) -> PathBuf {
+    write_fixture(
+        dir,
+        "events.jsonl",
+        "{\"id\": 1, \"kind\": \"click\"}\n{\"id\": 2, \"kind\": \"view\"}\n{\"id\": 3, \"kind\": \"click\"}\n",
+    )
+}
+
+/// Creates `dir/single.json`: one JSON object formatted over several lines,
+/// which is neither a top-level array nor one object per line.
+#[allow(dead_code)]
+pub fn create_multi_line_object_json(dir: &std::path::Path) -> PathBuf {
+    write_fixture(dir, "single.json", "{\n  \"a\": 1\n}\n")
+}
+
+/// Creates `dir/malformed.ndjson`: correct NDJSON framing with a typo on line
+/// 2, where the closing brace is missing.
+#[allow(dead_code)]
+pub fn create_malformed_ndjson(dir: &std::path::Path) -> PathBuf {
+    write_fixture(dir, "malformed.ndjson", "{\"a\":1}\n{\"a\":2\n{\"a\":3}\n")
 }
