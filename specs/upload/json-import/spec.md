@@ -1,39 +1,37 @@
 # Feature: JSON Import
 
-Upload a JSON or NDJSON file into Exasol as a relational table family. A flat document set becomes one table with one column per scalar property. This feature covers file framing, dry-run preview, scalar column typing, and repeated runs. Fan-out of nested objects and arrays into subtables, and the generated key columns that link them, are covered by the sibling feature `upload/json-import-nesting`.
+Upload a JSON or NDJSON file into Exasol as a relational table family. A flat document set becomes one table with one column per scalar property. This feature covers file framing, dry-run preview, and scalar column typing. Schema resolution, column-name-based import, and repeated-run behavior are covered by the sibling feature `upload/json-import-columns`. Fan-out of nested objects and arrays into subtables, and the generated key columns that link them, are covered by `upload/json-import-nesting`.
 
 ## Background
 
-exapump connects to Exasol via exarrow-rs using the DSN provided by `--dsn`, `EXAPUMP_DSN`, or `--profile`. File format is detected from the file extension (`.json` or `.ndjson`). The upload command is async.
+exapump connects to Exasol via exarrow-rs using the DSN provided by `--dsn`, `EXAPUMP_DSN`, or `--profile`. File format is detected from the file extension (`.json`, `.ndjson`, or `.jsonl`). The upload command is async.
 
-Normalization is performed by the `json_tables_core` crate from `exasol-labs/exasol-json-tables`. exapump owns file reading, connection handling, the Arrow conversion, and the import. `json_tables_core` owns every decision about which tables exist, which columns they carry, and which DDL describes them.
+The `json_tables_core` crate from `exasol-labs/exasol-json-tables` normalizes the document set. `json_tables_core` decides which tables the family holds and which columns each table carries. exapump owns file reading, framing, the SQL it runs, connection handling, the Arrow conversion, and the import.
 
-Framing is detected from the first non-whitespace byte of the file, not from the extension. A leading `[` selects a single top-level JSON array of objects. Any other byte selects NDJSON, one JSON object per line. Both extensions accept both framings.
+Framing is detected from the first non-whitespace byte of the file, not from the extension. A leading `[` selects a single top-level JSON array of objects. Any other byte selects NDJSON, one JSON object per line. All three extensions accept both framings. A single JSON object spread over several lines matches neither framing. The sibling feature `upload/json-import-rejection` covers its rejection.
 
 The document set is read twice. The first pass collects property and type statistics and derives the table family. The second pass writes rows into in-memory column buffers.
 
-`--table <name>` names the root table and supplies the base name for every subtable. exapump uppercases the schema part and the table part of `--table`, then quotes both, so one `--table` value names the same root table for JSON, CSV, and Parquet input. Subtable naming for nested paths, and the array fan-out that produces them, is covered by the sibling feature `upload/json-import-nesting`.
+`--table <name>` names the root table and supplies the base name for every subtable. exapump uppercases the schema part and the table part of `--table`, then quotes both, so one `--table` value names the same root table for JSON, CSV, and Parquet input. The sibling feature `upload/json-import-columns` covers schema resolution when `--table` carries no schema part. Subtable naming for nested paths, and the array fan-out that produces them, is covered by the sibling feature `upload/json-import-nesting`.
 
-Every table of a family is created and loaded in one resolved schema. When `--table` carries a schema part, that part supplies it. When `--table` carries no schema part, the connection's default schema supplies it. When neither supplies one, the command fails before creating any table. Under `--dry-run` there is no connection, so an unqualified `--table` previews unqualified table names.
-
-Column typing follows the `json_tables_core` contract:
+exapump renders the `CREATE TABLE` statements from the column plan and maps each contract type to an Exasol type:
 
 | JSON value | Exasol column type |
 |------------|--------------------|
 | boolean | `BOOLEAN` |
-| integer | `DECIMAL(18,0)` |
+| integer | `DECIMAL(19,0)` |
 | fractional number | `DOUBLE` |
 | string | `VARCHAR(2000000)` |
+
+A number outside the 64-bit signed range is classified as a fractional number and lands in a `DOUBLE` column. The sibling feature `upload/json-import-columns` covers the full 64-bit signed range that an integer column holds.
 
 A property whose values carry more than one scalar type gets a primary column for the majority type and one `<name>|<type>` sibling column per remaining type. The type token is the `json_tables_core` type label, for example `integer` or `string`. A property that appears as an explicit JSON `null` in at least one document gets a `<name>|n` boolean mask column, so an explicit null stays distinguishable from an absent field.
 
 The command creates, loads, and reports the tables of a family in a deterministic order derived from the table path, so two runs over the same input report the same table order.
 
-All tables are created with `CREATE TABLE IF NOT EXISTS`, so a repeated run against the same target loads into the existing family. Primary-key and foreign-key constraint statements are out of scope for this feature.
+exapump imports rows by column name, so a value lands in the column of its own name whatever order the file lists the properties in. The sibling feature `upload/json-import-columns` covers column-name-based import, repeated runs against an existing family, and the schema each run resolves.
 
-Limit: generated `_id` values repeat across runs. `json_tables_core` restarts the `_id` counter at 1 on every run, so an `_id` value is unique only within one run. A `_parent` value therefore resolves only against the rows that the same run wrote. The command prints this limit as a warning on stderr on every import.
-
-The whole family is buffered in memory before the import starts. A top-level JSON array is also parsed as one value. Peak memory therefore scales with the file size, and NDJSON framing is the shape to prefer for a large input because it streams the read pass. This feature adds no chunking or spill-to-disk.
+exapump keeps every row in memory until the import starts, for both framings, so peak memory grows with the file size. NDJSON needs less memory than a JSON array, because exapump never parses the whole file into one value. This feature adds no chunking and no spill to disk.
 
 Rejection of malformed or empty input, and reporting of a failure partway through a family load, are covered by the sibling feature `upload/json-import-rejection`.
 
@@ -88,20 +86,10 @@ Rejection of malformed or empty input, and reporting of a failure partway throug
 * *AND* the mask column MUST hold `TRUE` for the document with the explicit null
 * *AND* the mask column MUST hold `FALSE` for the document with the absent property
 
-### Scenario: Repeated run loads into the existing family
+### Scenario: Import an NDJSON file with the .jsonl extension
 
-* *GIVEN* a file `orders.json` was already imported into `"SALES"."ORDERS"` and its subtables
-* *WHEN* the user runs the same `exapump upload orders.json --table sales.orders --dsn <dsn>` again
-* *THEN* the command MUST NOT fail on table creation
-* *AND* the command MUST append the documents to the existing tables
-* *AND* the command MUST print a warning to stderr stating that `_id` values repeat across runs and the family linkage holds only within one run
-* *AND* the command MUST exit with code 0
-
-### Scenario: Unqualified table name uses the connection schema
-
-* *GIVEN* a file `orders.json` exists
-* *AND* the DSN selects a default schema
-* *WHEN* the user runs `exapump upload orders.json --table orders --dsn <dsn>`
-* *THEN* the command MUST read the default schema from the connection and create the whole family in it
-* *AND* every import statement MUST name that schema explicitly rather than rely on session state
+* *GIVEN* a file `events.jsonl` holds one JSON object per line
+* *WHEN* the user runs `exapump upload events.jsonl --table raw.events --dsn <dsn>`
+* *THEN* the command MUST import one row per non-empty line into `"RAW"."EVENTS"`
+* *AND* the command MUST NOT report the file format as unsupported
 * *AND* the command MUST exit with code 0

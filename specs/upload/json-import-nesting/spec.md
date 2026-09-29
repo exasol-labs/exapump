@@ -4,15 +4,15 @@ Fan out a document set's nested objects and arrays into a subtable per nested pa
 
 ## Background
 
-exapump connects to Exasol via exarrow-rs using the DSN provided by `--dsn`, `EXAPUMP_DSN`, or `--profile`. The upload command is async.
+The sibling feature `upload/json-import` covers connection setup, framing detection, `--table` handling, schema resolution, column typing, and repeated-run behavior. This Background states only the table-family shape.
 
-Normalization is performed by the `json_tables_core` crate from `exasol-labs/exasol-json-tables`. exapump owns file reading, connection handling, the Arrow conversion, and the import. `json_tables_core` owns every decision about which tables exist, which columns they carry, and which DDL describes them.
+The `json_tables_core` crate from `exasol-labs/exasol-json-tables` decides which tables the family holds and which columns each table carries. exapump renders the `CREATE TABLE` statements from that plan and runs them.
 
-`--table <name>` names the root table and supplies the base name for every subtable. exapump uppercases the schema part and the table part of `--table`, then quotes both. A subtable name is the uppercased root table name, an underscore, and the encoded JSON path, with array segments suffixed `_arr`. The path segment keeps the JSON key case, because two JSON keys may differ only by case. `--table sales.orders` with a document property `items` holding an array therefore yields `"SALES"."ORDERS"` and `"SALES"."ORDERS_items_arr"`.
+A subtable name is the uppercased root table name, an underscore, and the encoded JSON path, with array segments suffixed `_arr`. The path segment keeps the JSON key case, because two JSON keys may differ only by case. `--table sales.orders` with a document property `items` holding an array therefore yields `"SALES"."ORDERS"` and `"SALES"."ORDERS_items_arr"`.
+
+The separator between two path segments becomes `_`, and an underscore inside a JSON key stays `_`. A nested path and a single key can therefore produce one table name. The sibling feature `upload/json-import-rejection` covers the rejection of such a family.
 
 Nesting fans out past one level. A nested path yields one subtable per level, so an object inside an object, an object inside an array element, and an array inside an array element each get their own subtable. A keyed property of an array element keeps its key, for example `"DEEP_items_arr_tags_arr"`. An array element that is itself an array carries no key, so its own subtable takes the path segment `value`, for example `"MAT_matrix_arr_value_arr"`.
-
-Every table of a family is created and loaded in one resolved schema. When `--table` carries a schema part, that part supplies it. When `--table` carries no schema part, the connection's default schema supplies it.
 
 Generated key columns link the family. Every object table carries `_id`, including the root table of a flat document set that has no children. An array element table carries `_parent` and `_pos`, and carries `_id` only when it holds a nested array of its own. A parent of a nested object carries a `<name>|object` column holding the child row's `_id`. A parent of a nested array carries a `<name>|array` column holding that array's element count, named `_value|array` when the parent is an array element that is itself an array.
 

@@ -1,47 +1,14 @@
 # Feature: JSON Import Rejection
 
-Reject a JSON or NDJSON upload that cannot resolve a target schema, that cannot be parsed into a table family, or that fails partway through loading its table family. This feature covers the error paths of `upload/json-import`; see that feature for the table-family, framing, and typing rules that a successful import follows.
+Reject a JSON, NDJSON, or JSONL upload whose file cannot be found, framed, or read as usable document data. This feature covers the input-validation error paths of `upload/json-import`. Rejection of an unresolved schema, a colliding table family, or a failure partway through loading a family is covered by the sibling feature `upload/json-import-rejection-family`.
 
 ## Background
 
-exapump connects to Exasol via exarrow-rs using the DSN provided by `--dsn`, `EXAPUMP_DSN`, or `--profile`. File format is detected from the file extension (`.json` or `.ndjson`). The upload command is async.
+The sibling feature `upload/json-import` covers connection setup, framing detection, `--table` handling, column typing, and the import. The sibling feature `upload/json-import-nesting` covers subtable naming and the generated key columns. This Background states only what the input-validation error paths add.
 
-Normalization is performed by the `json_tables_core` crate from `exasol-labs/exasol-json-tables`. exapump owns file reading, connection handling, the Arrow conversion, and the import. `json_tables_core` owns every decision about which tables exist, which columns they carry, and which DDL describes them.
-
-`--table <name>` names the root table and supplies the base name for every subtable. Every table of a family is created and loaded in one resolved schema. When `--table` carries a schema part, that part supplies it. When `--table` carries no schema part, the connection's default schema supplies it. When neither supplies one, the command fails before creating any table.
-
-Resolving a schema name and opening it are two separate steps with two separate failures. A name that no rule supplies fails during resolution. A resolved name that Exasol does not hold fails when the command opens the schema.
-
-Rows are imported per table over `exarrow_rs::Connection::import_from_record_batches`. The import is not atomic across the table family. A failure partway through leaves the tables already loaded in place.
+exapump rejects a family that carries no document data. `_id`, `_parent`, `_pos`, and the `<name>|object` and `<name>|array` link columns are generated, so a table holding only those columns carries nothing that came out of a document.
 
 ## Scenarios
-
-### Scenario: Unqualified table name with no connection schema
-
-* *GIVEN* a file `orders.json` exists
-* *AND* the DSN selects no default schema
-* *WHEN* the user runs `exapump upload orders.json --table orders --dsn <dsn>`
-* *THEN* the command MUST exit with a non-zero code
-* *AND* stderr MUST state that no target schema could be resolved
-* *AND* the command MUST NOT create any table
-
-### Scenario: Qualified table name whose schema does not exist
-
-* *GIVEN* a file `orders.json` exists
-* *AND* Exasol holds no schema named `NO_SUCH_SCHEMA_XYZ`
-* *WHEN* the user runs `exapump upload orders.json --table NO_SUCH_SCHEMA_XYZ.orders --dsn <dsn>`
-* *THEN* the command MUST exit with a non-zero code
-* *AND* stderr MUST state that it failed to open the schema
-* *AND* stderr MUST name the schema `NO_SUCH_SCHEMA_XYZ`
-
-### Scenario: Import failure reports the tables already loaded
-
-* *GIVEN* a file `orders.json` produces a family of more than one table
-* *AND* one table in the family cannot be loaded
-* *WHEN* the user runs `exapump upload orders.json --table sales.orders --dsn <dsn>`
-* *THEN* the command MUST exit with a non-zero code, and stderr MUST name the table that failed
-* *AND* stdout MUST list the tables loaded before the failure
-* *AND* the command MUST NOT roll back the tables loaded before the failure
 
 ### Scenario: Empty JSON file
 
@@ -63,7 +30,16 @@ Rows are imported per table over `exarrow_rs::Connection::import_from_record_bat
 
 * *GIVEN* a file `blank.json` holds a top-level JSON array whose every element is an empty object
 * *WHEN* the user runs `exapump upload blank.json --table raw.blank --dsn <dsn>`
-* *THEN* the command MUST reject the input because every planned table carries only the generated key columns `_id`, `_parent`, and `_pos`
+* *THEN* the command MUST reject the input, because no planned table carries a column that came out of a document
+* *AND* the command MUST exit with a non-zero code
+* *AND* stderr MUST indicate that no column could be derived from the documents
+* *AND* the command MUST NOT create any table
+
+### Scenario: Nested object that holds no properties
+
+* *GIVEN* a file `hollow.json` holds the single document `{"a": {}}`
+* *WHEN* the user runs `exapump upload hollow.json --table raw.hollow --dsn <dsn>`
+* *THEN* the command MUST reject the input, because the root table carries only `_id` and the generated `"a|object"` link column, and the subtable carries only `_id`
 * *AND* the command MUST exit with a non-zero code
 * *AND* stderr MUST indicate that no column could be derived from the documents
 * *AND* the command MUST NOT create any table
