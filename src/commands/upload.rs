@@ -140,15 +140,14 @@ async fn json_import(path: &std::path::Path, args: &UploadArgs) -> anyhow::Resul
          links only the rows this run loaded."
     );
 
-    let (loaded, failure) = crate::json_tables::load(&family, path, &mut conn).await;
+    let mut loaded = Vec::new();
+    let outcome = crate::json_tables::load(&family, path, &mut conn, &mut loaded).await;
 
     for (table, rows) in &loaded {
         println!("Imported {rows} rows into {table}");
     }
 
-    if let Some(error) = failure {
-        return Err(error);
-    }
+    outcome?;
 
     let total: u64 = loaded.iter().map(|(_, rows)| *rows).sum();
     println!("Imported {total} rows in total");

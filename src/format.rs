@@ -9,7 +9,7 @@ pub enum FileFormat {
     Json,
 }
 
-const SUPPORTED_FORMATS: &str = ".parquet, .csv, .json, .ndjson";
+const SUPPORTED_FORMATS: &str = ".parquet, .csv, .json, .ndjson, .jsonl";
 
 /// Returns an error listing supported formats when the extension is unrecognized.
 pub fn detect_from_path(path: &Path) -> Result<FileFormat> {
@@ -18,7 +18,7 @@ pub fn detect_from_path(path: &Path) -> Result<FileFormat> {
     match ext.to_ascii_lowercase().as_str() {
         "parquet" => Ok(FileFormat::Parquet),
         "csv" => Ok(FileFormat::Csv),
-        "json" | "ndjson" => Ok(FileFormat::Json),
+        "json" | "ndjson" | "jsonl" => Ok(FileFormat::Json),
         _ => bail!("file format {ext:?} is not supported. Supported formats: {SUPPORTED_FORMATS}"),
     }
 }
@@ -50,7 +50,7 @@ mod tests {
             "error should mention not supported: {msg}"
         );
         assert!(
-            msg.contains(".parquet, .csv, .json, .ndjson"),
+            msg.contains(".parquet, .csv, .json, .ndjson, .jsonl"),
             "error should list supported formats: {msg}"
         );
     }
@@ -82,6 +82,12 @@ mod tests {
     #[test]
     fn ndjson_extension_returns_json() {
         let result = detect_from_path(Path::new("data.ndjson"));
+        assert_eq!(result.unwrap(), FileFormat::Json);
+    }
+
+    #[test]
+    fn jsonl_extension_returns_json() {
+        let result = detect_from_path(Path::new("data.jsonl"));
         assert_eq!(result.unwrap(), FileFormat::Json);
     }
 

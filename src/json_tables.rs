@@ -1,11 +1,13 @@
 //! Turns a JSON or NDJSON file into an Exasol table family.
 //!
-//! `json_tables_core` owns every decision about which tables exist, which
-//! columns they carry, and which DDL describes them. This module owns what that
+//! `json_tables_core` owns which tables exist and which columns each table
+//! carries. This module owns every SQL statement exapump runs, and what that
 //! crate deliberately leaves out: reading the file, naming the tables the way
-//! exapump names them for every other format, converting the buffered rows to
-//! Arrow, and running the statements over a connection.
+//! exapump names them for every other format, mapping a contract type to an
+//! Exasol type, converting the buffered rows to Arrow, and running the
+//! statements over a connection.
 
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -15,28 +17,30 @@ use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 use json_tables_core::buffer::{ColumnBuffers, ColumnValues};
 use json_tables_core::contract::{
-    column_sql_type, sanitize_ident, table_sql_name, ColumnPlan, PlannedTable,
+    sanitize_ident, table_raw_name, table_sql_name, ColumnPlan, PlannedTable, SimpleType, TablePath,
 };
-use json_tables_core::ddl::build_sql_schema;
 use json_tables_core::infer::{build_all_schema_plans, StatsCollector};
-use json_tables_core::read::{detect_format, for_each_document};
+use json_tables_core::read::{detect_format, for_each_document, InputFormat};
 use json_tables_core::sink::write_document;
 
-/// Columns `json_tables_core` generates itself. A table holding nothing else
-/// carries no data that came out of the documents.
+/// The fixed names `json_tables_core` generates on every table it plans.
+///
+/// These are the only generated names known ahead of any document.
+/// `reject_unusable_plans` adds the `<name>|object` and `<name>|array` link
+/// columns to them, whose names depend on the documents and so are read from
+/// `plan.properties` instead.
 const GENERATED_KEY_COLUMNS: [&str; 3] = ["_id", "_parent", "_pos"];
 
 /// A planned table family derived from one JSON or NDJSON file.
 ///
-/// The family is ordered: `plans`, `ddl`, and every row count this module
-/// returns share the order `build_all_schema_plans` produced, which is the
-/// table path in lexical order. Two runs over the same input therefore create,
-/// load, and report the same tables in the same sequence.
+/// The family is ordered: `plans` and every row count this module returns share
+/// the order `build_all_schema_plans` produced, which is the table path in
+/// lexical order. Two runs over the same input therefore create, load, and
+/// report the same tables in the same sequence.
 pub struct TableFamily {
     plans: Vec<PlannedTable>,
     stem: String,
     schema: Option<String>,
-    ddl: Vec<String>,
 }
 
 /// Scans `path` and derives the table family for the target `table`.
@@ -59,13 +63,12 @@ pub fn plan_family(path: &Path, table: &str) -> anyhow::Result<TableFamily> {
     let plans = build_all_schema_plans(&stats.finish());
 
     reject_unusable_plans(&plans, path)?;
-    let ddl = build_ddl(&plans, &stem, schema.as_deref())?;
+    reject_duplicate_table_names(&plans, &stem, path)?;
 
     Ok(TableFamily {
         plans,
         stem,
         schema,
-        ddl,
     })
 }
 
@@ -73,10 +76,11 @@ impl TableFamily {
     /// Table names, their columns, and the planned CREATE statements, for `--dry-run`.
     pub fn describe(&self) -> String {
         let mut out = String::new();
-        for (plan, create) in self.plans.iter().zip(&self.ddl) {
+        for plan in &self.plans {
+            let schema = self.schema.as_deref();
             out.push_str(&format!(
                 "Table {}\n",
-                qualified_name(plan, &self.stem, self.schema.as_deref())
+                qualified_name(plan, &self.stem, schema)
             ));
             out.push_str("Columns:\n");
             for (column, sql_type) in physical_columns(plan) {
@@ -86,7 +90,10 @@ impl TableFamily {
                     sql_type
                 ));
             }
-            out.push_str(&format!("\n{create}\n\n"));
+            out.push_str(&format!(
+                "\n{}\n\n",
+                create_table_ddl(plan, &self.stem, schema)
+            ));
         }
         out
     }
@@ -112,11 +119,12 @@ impl TableFamily {
     }
 }
 
-/// The table's name, qualified with the schema `--table` carried.
+/// The table's name, qualified with `schema` when one is given.
 ///
-/// `build_sql_schema` emits unqualified names, and a dry run has no connection
-/// to resolve a default schema from, so an unqualified `--table` stays
-/// unqualified here. `load` qualifies its own statements instead.
+/// A dry run has no connection to resolve a default schema from, so it passes
+/// `None` and an unqualified `--table` previews unqualified names. `load`
+/// resolves the schema first and passes it here, so every statement it runs
+/// names the schema explicitly.
 fn qualified_name(plan: &PlannedTable, stem: &str, schema: Option<&str>) -> String {
     let table = table_sql_name(&plan.path, stem);
     match schema {
@@ -125,43 +133,50 @@ fn qualified_name(plan: &PlannedTable, stem: &str, schema: Option<&str>) -> Stri
     }
 }
 
-/// Restates the `build_sql_schema` CREATE statements as exapump's upload
-/// contract requires them: idempotent, and naming the schema the family
-/// resolved. The constraint statements are discarded; they are emitted
-/// `DISABLE` upstream and enforce nothing.
-fn build_ddl(
-    plans: &[PlannedTable],
-    stem: &str,
-    schema: Option<&str>,
-) -> anyhow::Result<Vec<String>> {
-    let (creates, _constraints) = build_sql_schema(plans, stem);
-
-    plans
-        .iter()
-        .zip(creates)
-        .map(|(plan, create)| {
-            rewrite_create(
-                &create,
-                &table_sql_name(&plan.path, stem),
-                &qualified_name(plan, stem, schema),
-            )
-        })
-        .collect()
+/// The Exasol column type for a contract scalar type, or `None` for a type that
+/// never becomes a physical column.
+///
+/// exapump owns this mapping rather than reusing `json_tables_core`'s
+/// `column_sql_type`, which maps an integer to `DECIMAL(18,0)`. An integer
+/// column holds an `i64`, and `DECIMAL(18,0)` stops at 18 digits, so the
+/// upstream type cannot represent the whole 64-bit signed range. `DECIMAL(19,0)`
+/// can, so every value the contract classifies as an integer survives the load.
+fn exasol_type(ty: SimpleType) -> Option<&'static str> {
+    match ty {
+        SimpleType::Bool => Some("BOOLEAN"),
+        SimpleType::Integer => Some("DECIMAL(19,0)"),
+        SimpleType::Number => Some("DOUBLE"),
+        SimpleType::String => Some("VARCHAR(2000000)"),
+        SimpleType::Null | SimpleType::Object | SimpleType::Array => None,
+    }
 }
 
-/// Restates one upstream CREATE statement as `CREATE TABLE IF NOT EXISTS
-/// {qualified}`, keeping its column list verbatim.
+/// The `CREATE TABLE` statement for one planned table, naming `schema`.
 ///
-/// The rewrite recognises the statement by the head `build_sql_schema` is
-/// contracted to emit. A head it does not recognise is an upstream change
-/// exapump cannot reason about, so it fails here rather than splicing a body
-/// onto a name it did not verify.
-fn rewrite_create(create: &str, emitted: &str, qualified: &str) -> anyhow::Result<String> {
-    let head = format!("CREATE TABLE {emitted} (");
-    let body = create.strip_prefix(&head).with_context(|| {
-        format!("json_tables_core emitted an unrecognised CREATE statement for {emitted}")
-    })?;
-    Ok(format!("CREATE TABLE IF NOT EXISTS {qualified} ({body}"))
+/// exapump renders the statement from the column plan rather than rewriting one
+/// `json_tables_core` emitted, so the declared column order is the
+/// `physical_columns` order by construction and the qualified name is never
+/// spliced onto a statement head exapump did not produce. `IF NOT EXISTS` makes
+/// a repeated run load into the family it already created. A column is
+/// `NOT NULL` when the plan marks it required or makes it a null mask, matching
+/// the rule upstream's own `build_sql_schema` applies.
+fn create_table_ddl(plan: &PlannedTable, stem: &str, schema: Option<&str>) -> String {
+    let columns: Vec<String> = physical_columns(plan)
+        .map(|(column, sql_type)| {
+            let not_null = if column.is_required || column.is_null_mask {
+                " NOT NULL"
+            } else {
+                ""
+            };
+            format!("  {} {sql_type}{not_null}", sanitize_ident(&column.name))
+        })
+        .collect();
+
+    format!(
+        "CREATE TABLE IF NOT EXISTS {} (\n{}\n);",
+        qualified_name(plan, stem, schema),
+        columns.join(",\n")
+    )
 }
 
 /// The planned columns that become real table columns, paired with their Exasol
@@ -169,7 +184,7 @@ fn rewrite_create(create: &str, emitted: &str, qualified: &str) -> anyhow::Resul
 fn physical_columns(plan: &PlannedTable) -> impl Iterator<Item = (&ColumnPlan, &'static str)> {
     plan.columns
         .iter()
-        .filter_map(|column| column_sql_type(column.ty).map(|sql_type| (column, sql_type)))
+        .filter_map(|column| exasol_type(column.ty).map(|sql_type| (column, sql_type)))
 }
 
 /// Rejects a family that would create tables holding no document data.
@@ -178,17 +193,64 @@ fn reject_unusable_plans(plans: &[PlannedTable], path: &Path) -> anyhow::Result<
         anyhow::bail!("{} contains no documents", path.display());
     }
 
-    let only_keys = plans.iter().all(|plan| {
+    let carries_document_data = plans.iter().any(|plan| {
+        let generated = generated_column_names(plan);
         plan.columns
             .iter()
-            .all(|column| GENERATED_KEY_COLUMNS.contains(&column.name.as_str()))
+            .any(|column| !generated.contains(column.name.as_str()))
     });
-    if only_keys {
+    if !carries_document_data {
         anyhow::bail!(
-            "no column could be derived from the documents in {}: every planned table carries only the generated key columns {}",
+            "no column could be derived from the documents in {}: every planned table carries \
+             only generated columns, which are the key columns {} and the \"<name>|object\" and \
+             \"<name>|array\" columns that link a parent row to a nested table",
             path.display(),
             GENERATED_KEY_COLUMNS.join(", ")
         );
+    }
+
+    Ok(())
+}
+
+/// The column names in `plan` that `json_tables_core` generated rather than
+/// derived from a document property.
+///
+/// The link column names come from the plan's own property map rather than from
+/// matching the `|object` and `|array` suffixes on the column name, so a
+/// document property literally named `x|object` still counts as document data.
+fn generated_column_names(plan: &PlannedTable) -> HashSet<&str> {
+    let mut names: HashSet<&str> = GENERATED_KEY_COLUMNS.iter().copied().collect();
+    for property in plan.properties.values() {
+        names.extend(property.object_fk.as_deref());
+        names.extend(property.array_count.as_deref());
+    }
+    names
+}
+
+/// Rejects a family whose planned table names are not unique.
+///
+/// Two JSON paths can sanitize to one table name, and the load would then write
+/// two different document shapes into that one table. The check runs while the
+/// family is still only a plan, so a `--dry-run` reports it too and no table
+/// exists when the run fails.
+fn reject_duplicate_table_names(
+    plans: &[PlannedTable],
+    stem: &str,
+    path: &Path,
+) -> anyhow::Result<()> {
+    let mut claimed: HashMap<String, &TablePath> = HashMap::new();
+    for plan in plans {
+        let name = table_raw_name(&plan.path, stem);
+        if let Some(first) = claimed.insert(name.clone(), &plan.path) {
+            anyhow::bail!(
+                "two JSON paths in {} produce the table name {}: {} and {}. Rename one of the \
+                 properties, or import the two paths under different --table values.",
+                path.display(),
+                name,
+                first,
+                plan.path
+            );
+        }
     }
 
     Ok(())
@@ -201,6 +263,12 @@ fn reject_unusable_plans(plans: &[PlannedTable], path: &Path) -> anyhow::Result<
 /// decision rather than two. A failure raised by `visit` comes back unchanged:
 /// only opening, framing, and parsing the file are reported as read failures,
 /// so the message never names an operation that did not fail.
+///
+/// The multi-line-object diagnosis is attached only when line framing produced
+/// no document at all, because a single object spread over several lines fails
+/// on its first line. A file that yielded at least one document is real NDJSON
+/// with a malformed line, and its message keeps the line number that names the
+/// defect instead of blaming the framing.
 fn read_documents<F>(path: &Path, mut visit: F) -> anyhow::Result<()>
 where
     F: FnMut(usize, &serde_json::Map<String, serde_json::Value>) -> anyhow::Result<()>,
@@ -212,7 +280,9 @@ where
         detect_format(&mut reader).with_context(|| format!("failed to read {}", path.display()))?;
 
     let mut visit_failure: Option<anyhow::Error> = None;
+    let mut documents_seen = 0usize;
     let framing = for_each_document(reader, format, |index, document| {
+        documents_seen += 1;
         visit(index, document).map_err(|error| {
             visit_failure = Some(error);
             json_tables_core::CoreError::msg("document rejected")
@@ -222,74 +292,69 @@ where
     if let Some(error) = visit_failure {
         return Err(error);
     }
-    framing.with_context(|| format!("failed to read {}", path.display()))
+    let framed_nothing = matches!(format, InputFormat::Lines) && documents_seen == 0;
+    framing
+        .map_err(|error| {
+            let error = anyhow::Error::new(error);
+            if framed_nothing {
+                error.context(
+                    "the file is neither a JSON array of objects nor one JSON object per line. A \
+                     single JSON object spread over several lines matches neither framing",
+                )
+            } else {
+                error
+            }
+        })
+        .with_context(|| format!("failed to read {}", path.display()))
 }
 
 /// Creates the family's tables and loads every document from `path`.
 ///
-/// The returned vector holds the row count loaded per table, in family order.
-/// On a failure it holds every table loaded before the error. On success it
-/// holds every table of the family. The returned option holds the failure.
+/// `loaded` accumulates the row count loaded per table, in family order, and is
+/// appended to as each table finishes. It therefore holds every table of the
+/// family on success, and every table loaded before the error on a failure.
 ///
 /// The import is not atomic across the family: a failure partway through leaves
-/// the tables already loaded in place, which is why the counts come back beside
-/// the error rather than instead of it. Nothing here writes to stdout; the
-/// caller owns the report.
+/// the tables already loaded in place, which is why the counts accumulate into a
+/// caller-owned vector rather than being returned only on success. Nothing here
+/// writes to stdout; the caller owns the report.
 pub async fn load(
     family: &TableFamily,
     path: &Path,
     conn: &mut exarrow_rs::Connection,
-) -> (Vec<(String, u64)>, Option<anyhow::Error>) {
-    let mut loaded = Vec::new();
+    loaded: &mut Vec<(String, u64)>,
+) -> anyhow::Result<()> {
+    let schema = family.target_schema(conn)?;
 
-    let schema = match family.target_schema(conn) {
-        Ok(schema) => schema,
-        Err(error) => return (loaded, Some(error)),
-    };
+    create_tables(conn, family, &schema).await?;
 
-    if let Err(error) = create_tables(conn, family, &schema).await {
-        return (loaded, Some(error));
-    }
-
-    let buffers = match collect_rows(family, path) {
-        Ok(buffers) => buffers,
-        Err(error) => return (loaded, Some(error)),
-    };
+    let buffers = collect_rows(family, path)?;
 
     for plan in &family.plans {
         let table = qualified_name(plan, &family.stem, Some(&schema));
-        let batch = match build_record_batch(plan, &buffers)
-            .with_context(|| format!("failed to build the rows for {table}"))
-        {
-            Ok(batch) => batch,
-            Err(error) => return (loaded, Some(error)),
-        };
-        match import_batch(conn, &table, batch).await {
-            Ok(rows) => loaded.push((table, rows)),
-            Err(error) => return (loaded, Some(error)),
-        }
+        let batch = build_record_batch(plan, &buffers)
+            .with_context(|| format!("failed to build the rows for {table}"))?;
+        let rows = import_batch(conn, &table, batch).await?;
+        loaded.push((table, rows));
     }
 
-    (loaded, None)
+    Ok(())
 }
 
-/// Opens the resolved schema, then creates every table of the family in family
-/// order.
+/// Creates every table of the family in family order, in the resolved schema.
 ///
-/// `build_sql_schema` emits unqualified names for an unqualified `--table`, so
-/// the open schema is what places those tables in the resolved schema.
+/// Every statement names `schema`, so which schema the family lands in never
+/// depends on the session state an earlier statement left behind. A schema
+/// Exasol does not hold therefore fails here, on the family's first table,
+/// rather than at a separate preparatory statement.
 async fn create_tables(
     conn: &mut exarrow_rs::Connection,
     family: &TableFamily,
     schema: &str,
 ) -> anyhow::Result<()> {
-    let quoted_schema = sanitize_ident(schema);
-    conn.execute(&format!("OPEN SCHEMA {quoted_schema}"))
-        .await
-        .with_context(|| format!("failed to open schema {quoted_schema}"))?;
-
-    for (plan, create) in family.plans.iter().zip(&family.ddl) {
-        conn.execute(create).await.with_context(|| {
+    for plan in &family.plans {
+        let create = create_table_ddl(plan, &family.stem, Some(schema));
+        conn.execute(&create).await.with_context(|| {
             format!(
                 "failed to create {}",
                 qualified_name(plan, &family.stem, Some(schema))
@@ -312,8 +377,9 @@ fn collect_rows(family: &TableFamily, path: &Path) -> anyhow::Result<ColumnBuffe
 
 /// The buffered rows of one planned table, as the batch the import takes.
 ///
-/// Field order is the CREATE statement's column order, because the import maps
-/// CSV fields onto table columns by position rather than by name. The buffer is
+/// The import names its columns, so field order no longer decides which column
+/// a value lands in. Field order still follows `physical_columns`, so the batch
+/// and the CREATE statement describe the table the same way. The buffer is
 /// resolved by table path: `ColumnBuffers` holds its tables in a `HashMap`, so
 /// iterating it would yield a per-process random order.
 fn build_record_batch(plan: &PlannedTable, buffers: &ColumnBuffers) -> anyhow::Result<RecordBatch> {
@@ -356,21 +422,42 @@ fn build_record_batch(plan: &PlannedTable, buffers: &ColumnBuffers) -> anyhow::R
         .with_context(|| format!("failed to assemble the rows of table path {}", plan.path))
 }
 
-/// Imports one batch into one explicitly qualified table.
+/// Imports one batch into one explicitly qualified table, naming the columns it
+/// carries.
+///
+/// The statement lists exactly the batch's own columns and nothing else, so a
+/// value lands in the column of its own name whatever order the file listed the
+/// properties in, a column the table holds but this batch never names loads
+/// NULL, and a column the batch names but the table does not hold fails the
+/// import by name instead of landing in a neighbouring column of the same type.
+/// `exarrow_rs` writes the list into the statement verbatim, so each name is
+/// quoted here exactly once.
 async fn import_batch(
     conn: &mut exarrow_rs::Connection,
     table: &str,
     batch: RecordBatch,
 ) -> anyhow::Result<u64> {
-    conn.import_from_record_batches(table, [batch], exarrow_rs::ArrowImportOptions::new())
+    let schema = batch.schema();
+    let columns: Vec<String> = schema
+        .fields()
+        .iter()
+        .map(|field| sanitize_ident(field.name()))
+        .collect();
+    let options = exarrow_rs::ArrowImportOptions::new().columns(columns.clone());
+
+    conn.import_from_record_batches(table, [batch], options)
         .await
-        .with_context(|| format!("failed to import into {table}"))
+        .with_context(|| {
+            format!(
+                "failed to import into {table}, naming the columns {}",
+                columns.join(", ")
+            )
+        })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use json_tables_core::contract::ColumnKind;
 
     #[test]
     fn read_documents_returns_the_visitors_error_unchanged() {
@@ -391,141 +478,42 @@ mod tests {
     }
 
     #[test]
-    fn build_ddl_rejects_an_unrecognised_create_statement() {
-        let error = rewrite_create(
-            "CREATE TABLE \"ORDERS\" AS SELECT 1;",
-            "\"ORDERS\"",
-            "\"SALES\".\"ORDERS\"",
-        )
-        .unwrap_err();
-
-        assert!(
-            format!("{error}").contains("unrecognised CREATE statement"),
-            "a statement head exapump cannot rewrite must be reported, not spliced: {error}"
-        );
-    }
-
-    /// A family covering every table kind and every column kind the contract
-    /// has: a root object table, a nested object subtable, a nested array
-    /// subtable, a `Primary` column per property, an `Alternate` for `code`
-    /// (string twice, integer once), and a `NullBitmask` for `note` (an
-    /// explicit null once).
-    fn mixed_family() -> Vec<serde_json::Map<String, serde_json::Value>> {
-        [
-            serde_json::json!({
-                "id": 1,
-                "code": "A1",
-                "note": null,
-                "customer": {"tier": "gold"},
-                "items": [{"sku": "S1"}]
-            }),
-            serde_json::json!({
-                "id": 2,
-                "code": "B2",
-                "note": "kept",
-                "customer": {"tier": "silver"},
-                "items": [{"sku": "S2"}, {"sku": "S3"}]
-            }),
-            serde_json::json!({
-                "id": 3,
-                "code": 42,
-                "customer": {"tier": "bronze"},
-                "items": []
-            }),
-        ]
-        .into_iter()
-        .map(|value| match value {
-            serde_json::Value::Object(document) => document,
-            other => panic!("fixture document is not an object: {other}"),
-        })
-        .collect()
-    }
-
-    /// The quoted column identifiers a CREATE statement declares, in order.
-    fn declared_columns(create: &str) -> Vec<String> {
-        let (_, body) = create
-            .split_once('(')
-            .expect("a CREATE statement opens a column list");
-        body.lines()
-            .map(str::trim)
-            .take_while(|line| *line != ");")
-            .filter(|line| !line.is_empty())
-            .map(leading_quoted_ident)
-            .collect()
-    }
-
-    /// The leading double-quoted identifier of a column declaration, its
-    /// doubled-quote escapes included.
-    fn leading_quoted_ident(declaration: &str) -> String {
-        let mut chars = declaration.chars().peekable();
+    fn exasol_type_maps_every_contract_type() {
+        assert_eq!(exasol_type(SimpleType::Bool), Some("BOOLEAN"));
         assert_eq!(
-            chars.next(),
-            Some('"'),
-            "column declaration does not open with a quoted identifier: {declaration}"
+            exasol_type(SimpleType::Integer),
+            Some("DECIMAL(19,0)"),
+            "an integer column holds an i64, which DECIMAL(18,0) cannot represent in full"
         );
-        let mut ident = String::from('"');
-        while let Some(character) = chars.next() {
-            ident.push(character);
-            if character == '"' {
-                if chars.peek() == Some(&'"') {
-                    ident.push(chars.next().expect("peeked character"));
-                } else {
-                    return ident;
-                }
-            }
-        }
-        panic!("unterminated quoted identifier: {declaration}");
+        assert_eq!(exasol_type(SimpleType::Number), Some("DOUBLE"));
+        assert_eq!(exasol_type(SimpleType::String), Some("VARCHAR(2000000)"));
+        assert_eq!(exasol_type(SimpleType::Null), None);
+        assert_eq!(exasol_type(SimpleType::Object), None);
+        assert_eq!(exasol_type(SimpleType::Array), None);
     }
 
     #[test]
-    fn ddl_column_order_matches_record_batch_field_order() {
-        let documents = mixed_family();
+    fn create_table_ddl_marks_required_and_null_mask_columns_not_null() {
+        let documents: Vec<serde_json::Map<String, serde_json::Value>> = [
+            serde_json::json!({"id": 1, "note": null}),
+            serde_json::json!({"id": 2, "extra": "x"}),
+        ]
+        .into_iter()
+        .map(|value| match value {
+            serde_json::Value::Object(object) => object,
+            other => panic!("the fixture must be a JSON object, got {other}"),
+        })
+        .collect();
+
         let plans = StatsCollector::plan_from_documents(&documents);
-        let mut buffers = ColumnBuffers::new(&plans);
-        for document in &documents {
-            write_document(&mut buffers, document).unwrap();
-        }
-        let ddl = build_ddl(&plans, "ORDERS", Some("SALES")).unwrap();
 
-        let kinds: Vec<&ColumnKind> = plans
-            .iter()
-            .flat_map(|plan| plan.columns.iter().map(|column| &column.kind))
-            .collect();
-        assert_eq!(plans.len(), 3, "expected a root table and two subtables");
-        assert!(
-            kinds
-                .iter()
-                .any(|kind| matches!(kind, ColumnKind::Alternate { .. })),
-            "the fixture must produce an alternate column, or a reorder across one goes unseen"
+        assert_eq!(
+            create_table_ddl(&plans[0], "ORDERS", Some("SALES")),
+            "CREATE TABLE IF NOT EXISTS \"SALES\".\"ORDERS\" (\n  \"_id\" DECIMAL(19,0) NOT NULL,\n  \
+             \"id\" DECIMAL(19,0),\n  \"note|n\" BOOLEAN NOT NULL,\n  \"extra\" \
+             VARCHAR(2000000)\n);",
+            "a required column and a null-mask column each carry NOT NULL, while an ordinary \
+             document column does not"
         );
-        assert!(
-            kinds
-                .iter()
-                .any(|kind| matches!(kind, ColumnKind::NullBitmask { .. })),
-            "the fixture must produce a null-mask column, or a reorder across one goes unseen"
-        );
-
-        for (plan, create) in plans.iter().zip(&ddl) {
-            let batch = build_record_batch(plan, &buffers).unwrap();
-            let fields: Vec<String> = batch
-                .schema()
-                .fields()
-                .iter()
-                .map(|field| sanitize_ident(field.name()))
-                .collect();
-            let declared = declared_columns(create);
-
-            assert!(
-                !declared.is_empty(),
-                "no column parsed out of the CREATE statement for {}: {create}",
-                plan.path
-            );
-            assert_eq!(
-                declared, fields,
-                "table {} declares {declared:?} but its batch carries {fields:?}; the import \
-                 maps CSV fields onto columns by position, so any difference loads wrong data",
-                plan.path
-            );
-        }
     }
 }

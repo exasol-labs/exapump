@@ -68,7 +68,7 @@ Standard Exasol and Arrow terminology applies. No project-specific redefinitions
 | Language | Rust | Systems language for single-binary distribution |
 | CLI framework | clap (derive) | Argument parsing and help generation |
 | Core library | exarrow-rs (crates.io) | Exasol connectivity, Arrow-native import/export, schema inference, parallel transfer, SQL execution |
-| JSON normalization | json_tables_core (git, exasol-labs/exasol-json-tables, tag v0.3) | Parses JSON/NDJSON, infers a relational table family from nested documents, and emits Exasol DDL |
+| JSON normalization | json_tables_core (git, exasol-labs/exasol-json-tables, tag v0.3) | Parses JSON/NDJSON and infers a relational table family from nested documents: which tables exist and which columns they carry. exapump owns the DDL and the import. |
 | Testing | cargo test | Built-in unit and integration tests |
 
 ## Commands

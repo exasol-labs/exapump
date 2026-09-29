@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.15.0
+
+- `exapump upload` now maps JSON/NDJSON values into Exasol columns by name instead of by position: a repeated upload with a different column shape now fails clearly instead of silently loading values into the wrong columns
+- **Breaking.** A repeated JSON/NDJSON upload whose file carries a column the target table does not hold now fails, where it previously loaded that value into an unrelated column
+- A repeated JSON/NDJSON upload whose file omits a column the target table holds now loads NULL into that column and succeeds, where it previously failed with `ETL-6009`
+- Two JSON paths that would produce the same generated table name (for example a nested `customer.address` and a top-level `customer_address`) are now rejected before any table is created, instead of silently merging rows from both paths into one table
+- A JSON integer column is now created as `DECIMAL(19,0)` instead of `DECIMAL(18,0)`, so the full 64-bit signed integer range imports without an `ETL-3050` failure. A table an earlier version created keeps `DECIMAL(18,0)`; widen it with `ALTER TABLE <table> MODIFY COLUMN <column> DECIMAL(19,0)`
+- `exapump upload` now accepts the `.jsonl` extension, mapped the same as `.json`/`.ndjson`
+- An input like `{"a": {}}`, whose every planned table would carry only generated key columns, is now rejected instead of silently creating tables that hold no document data
+- A `.json` file holding a single JSON object spread over several lines now gets a clear error stating the file matches neither the JSON-array nor the one-object-per-line shape, instead of a raw parser error
+- The failure for a target schema Exasol does not hold now surfaces at the first `CREATE TABLE` instead of at `OPEN SCHEMA`; stderr still names the schema and the exit code is unchanged
+
+## 0.14.0
+
+- `exapump upload` accepts `.json` and `.ndjson` files: JSON and NDJSON documents import into a relational table family, one root table plus one subtable per nested object or array path
+- `--dry-run` previews the full table family and its DDL for JSON/NDJSON input without connecting
+- A partial-family import failure reports every table loaded before the error
+- Every JSON/NDJSON import prints a stderr warning that generated `_id` values restart at 1 on each run, so `_parent` and object-link columns only resolve within one run
+- **Breaking.** `exapump upload data.json` previously failed with "file format not supported"; it now imports the file
+
 ## 0.13.0
 
 - `exapump bucketfs <ls|cp|rm>` now treats `~/.exapump/config.toml` as a fallback value source instead of a precondition: `--bfs-host` together with `--bfs-write-password` or `--bfs-read-password` builds the connection on its own and needs no profile, so the command works on a machine that has no config file (#46)

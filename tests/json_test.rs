@@ -1,22 +1,33 @@
 mod fixtures;
 
+use std::path::Path;
+
+use assert_cmd::Command;
 use predicates::prelude::*;
+
+/// Builds an `upload` command for `path`, preloaded with `--table` and
+/// `--dsn`. The caller appends whatever else the scenario needs, such as
+/// `--dry-run` or a timeout, to the returned `Command`.
+fn upload_json(path: &Path, table: &str, dsn: &str) -> Command {
+    let mut cmd = fixtures::exapump();
+    cmd.args([
+        "upload",
+        path.to_str().unwrap(),
+        "--table",
+        table,
+        "--dsn",
+        dsn,
+    ]);
+    cmd
+}
 
 #[test]
 fn dry_run_shows_the_planned_table_family() {
     let dir = tempfile::tempdir().unwrap();
     let json_path = fixtures::create_nested_json(dir.path());
 
-    fixtures::exapump()
-        .args([
-            "upload",
-            json_path.to_str().unwrap(),
-            "--table",
-            "sales.orders",
-            "--dsn",
-            fixtures::DUMMY_DSN,
-            "--dry-run",
-        ])
+    upload_json(&json_path, "sales.orders", fixtures::DUMMY_DSN)
+        .args(["--dry-run"])
         .assert()
         .success()
         .stdout(predicate::str::contains("\"SALES\".\"ORDERS\""))
@@ -28,7 +39,7 @@ fn dry_run_shows_the_planned_table_family() {
         .stdout(predicate::str::contains("\"_pos\""))
         .stdout(predicate::str::contains("\"customer|object\""))
         .stdout(predicate::str::contains("\"items|array\""))
-        .stdout(predicate::str::contains("DECIMAL(18,0)"))
+        .stdout(predicate::str::contains("DECIMAL(19,0)"))
         .stdout(predicate::str::contains("VARCHAR(2000000)"));
 }
 
@@ -37,16 +48,8 @@ fn dry_run_omits_constraint_statements() {
     let dir = tempfile::tempdir().unwrap();
     let json_path = fixtures::create_nested_json(dir.path());
 
-    fixtures::exapump()
-        .args([
-            "upload",
-            json_path.to_str().unwrap(),
-            "--table",
-            "sales.orders",
-            "--dsn",
-            fixtures::DUMMY_DSN,
-            "--dry-run",
-        ])
+    upload_json(&json_path, "sales.orders", fixtures::DUMMY_DSN)
+        .args(["--dry-run"])
         .assert()
         .success()
         .stdout(predicate::str::contains("ALTER TABLE").not())
@@ -58,16 +61,8 @@ fn dry_run_without_schema_prefix_shows_unqualified_names() {
     let dir = tempfile::tempdir().unwrap();
     let json_path = fixtures::create_flat_json(dir.path());
 
-    fixtures::exapump()
-        .args([
-            "upload",
-            json_path.to_str().unwrap(),
-            "--table",
-            "orders",
-            "--dsn",
-            fixtures::DUMMY_DSN,
-            "--dry-run",
-        ])
+    upload_json(&json_path, "orders", fixtures::DUMMY_DSN)
+        .args(["--dry-run"])
         .assert()
         .success()
         .stdout(predicate::str::contains(
@@ -81,18 +76,8 @@ fn dry_run_accepts_and_ignores_the_delimiter_flag() {
     let dir = tempfile::tempdir().unwrap();
     let json_path = fixtures::create_flat_json(dir.path());
 
-    fixtures::exapump()
-        .args([
-            "upload",
-            json_path.to_str().unwrap(),
-            "--table",
-            "sales.orders",
-            "--dsn",
-            fixtures::DUMMY_DSN,
-            "--delimiter",
-            ";",
-            "--dry-run",
-        ])
+    upload_json(&json_path, "sales.orders", fixtures::DUMMY_DSN)
+        .args(["--delimiter", ";", "--dry-run"])
         .assert()
         .success()
         .stdout(predicate::str::contains("\"SALES\".\"ORDERS\""))
@@ -101,18 +86,14 @@ fn dry_run_accepts_and_ignores_the_delimiter_flag() {
 
 #[test]
 fn json_file_not_found() {
-    fixtures::exapump()
-        .args([
-            "upload",
-            "missing.json",
-            "--table",
-            "raw.missing",
-            "--dsn",
-            fixtures::DUMMY_DSN,
-        ])
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("missing.json"));
+    upload_json(
+        Path::new("missing.json"),
+        "raw.missing",
+        fixtures::DUMMY_DSN,
+    )
+    .assert()
+    .failure()
+    .stderr(predicate::str::contains("missing.json"));
 }
 
 #[test]
@@ -120,15 +101,7 @@ fn empty_json_file_is_rejected() {
     let dir = tempfile::tempdir().unwrap();
     let json_path = fixtures::create_empty_json(dir.path());
 
-    fixtures::exapump()
-        .args([
-            "upload",
-            json_path.to_str().unwrap(),
-            "--table",
-            "raw.empty",
-            "--dsn",
-            fixtures::DUMMY_DSN,
-        ])
+    upload_json(&json_path, "raw.empty", fixtures::DUMMY_DSN)
         .assert()
         .failure()
         .stderr(predicate::str::contains("empty"));
@@ -139,15 +112,7 @@ fn json_file_with_no_documents_is_rejected() {
     let dir = tempfile::tempdir().unwrap();
     let json_path = fixtures::create_empty_array_json(dir.path());
 
-    fixtures::exapump()
-        .args([
-            "upload",
-            json_path.to_str().unwrap(),
-            "--table",
-            "raw.none",
-            "--dsn",
-            fixtures::DUMMY_DSN,
-        ])
+    upload_json(&json_path, "raw.none", fixtures::DUMMY_DSN)
         .assert()
         .failure()
         .stderr(predicate::str::contains("no documents"));
@@ -158,15 +123,7 @@ fn documents_with_no_properties_are_rejected() {
     let dir = tempfile::tempdir().unwrap();
     let json_path = fixtures::create_empty_objects_json(dir.path());
 
-    fixtures::exapump()
-        .args([
-            "upload",
-            json_path.to_str().unwrap(),
-            "--table",
-            "raw.blank",
-            "--dsn",
-            fixtures::DUMMY_DSN,
-        ])
+    upload_json(&json_path, "raw.blank", fixtures::DUMMY_DSN)
         .assert()
         .failure()
         .stderr(predicate::str::contains("no column"));
@@ -177,15 +134,7 @@ fn non_object_array_entry_is_rejected_with_its_position() {
     let dir = tempfile::tempdir().unwrap();
     let json_path = fixtures::create_non_object_entry_json(dir.path());
 
-    fixtures::exapump()
-        .args([
-            "upload",
-            json_path.to_str().unwrap(),
-            "--table",
-            "raw.scalars",
-            "--dsn",
-            fixtures::DUMMY_DSN,
-        ])
+    upload_json(&json_path, "raw.scalars", fixtures::DUMMY_DSN)
         .assert()
         .failure()
         .stderr(predicate::str::contains("not an object"))
@@ -197,15 +146,7 @@ fn json_connection_failure() {
     let dir = tempfile::tempdir().unwrap();
     let json_path = fixtures::create_flat_json(dir.path());
 
-    fixtures::exapump()
-        .args([
-            "upload",
-            json_path.to_str().unwrap(),
-            "--table",
-            "sales.orders",
-            "--dsn",
-            "exasol://bad:bad@nowhere:9999",
-        ])
+    upload_json(&json_path, "sales.orders", "exasol://bad:bad@nowhere:9999")
         .assert()
         .failure()
         .stderr(predicate::str::is_empty().not());
@@ -219,21 +160,17 @@ async fn exasol_json_flat_import_creates_one_table() {
     let dir = tempfile::tempdir().unwrap();
     let json_path = fixtures::create_flat_json(dir.path());
 
-    fixtures::exapump()
-        .timeout(std::time::Duration::from_secs(60))
-        .args([
-            "upload",
-            json_path.to_str().unwrap(),
-            "--table",
-            &format!("{schema}.orders"),
-            "--dsn",
-            fixtures::DOCKER_DSN,
-        ])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains(format!(
-            "Imported 3 rows into \"{schema}\".\"ORDERS\""
-        )));
+    upload_json(
+        &json_path,
+        &format!("{schema}.orders"),
+        fixtures::DOCKER_DSN,
+    )
+    .timeout(std::time::Duration::from_secs(60))
+    .assert()
+    .success()
+    .stdout(predicate::str::contains(format!(
+        "Imported 3 rows into \"{schema}\".\"ORDERS\""
+    )));
 
     assert_eq!(
         fixtures::count_rows(
@@ -274,10 +211,6 @@ async fn exasol_json_flat_import_creates_one_table() {
         3,
         "expected one row per document"
     );
-
-    let _ = conn
-        .execute_update(&format!("DROP SCHEMA {schema} CASCADE"))
-        .await;
 }
 
 #[tokio::test]
@@ -288,27 +221,23 @@ async fn exasol_json_nested_import_creates_a_subtable_per_path() {
     let dir = tempfile::tempdir().unwrap();
     let json_path = fixtures::create_nested_json(dir.path());
 
-    fixtures::exapump()
-        .timeout(std::time::Duration::from_secs(60))
-        .args([
-            "upload",
-            json_path.to_str().unwrap(),
-            "--table",
-            &format!("{schema}.orders"),
-            "--dsn",
-            fixtures::DOCKER_DSN,
-        ])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains(format!(
-            "Imported 2 rows into \"{schema}\".\"ORDERS_customer\""
-        )))
-        .stdout(predicate::str::contains(format!(
-            "Imported 3 rows into \"{schema}\".\"ORDERS_items_arr\""
-        )))
-        .stdout(predicate::str::contains(format!(
-            "Imported 2 rows into \"{schema}\".\"ORDERS\""
-        )));
+    upload_json(
+        &json_path,
+        &format!("{schema}.orders"),
+        fixtures::DOCKER_DSN,
+    )
+    .timeout(std::time::Duration::from_secs(60))
+    .assert()
+    .success()
+    .stdout(predicate::str::contains(format!(
+        "Imported 2 rows into \"{schema}\".\"ORDERS_customer\""
+    )))
+    .stdout(predicate::str::contains(format!(
+        "Imported 3 rows into \"{schema}\".\"ORDERS_items_arr\""
+    )))
+    .stdout(predicate::str::contains(format!(
+        "Imported 2 rows into \"{schema}\".\"ORDERS\""
+    )));
 
     assert_eq!(
         fixtures::count_rows(
@@ -340,10 +269,6 @@ async fn exasol_json_nested_import_creates_a_subtable_per_path() {
         3,
         "every array element must become a row of its own"
     );
-
-    let _ = conn
-        .execute_update(&format!("DROP SCHEMA {schema} CASCADE"))
-        .await;
 }
 
 #[tokio::test]
@@ -354,24 +279,20 @@ async fn exasol_json_array_empty_in_every_document_creates_an_empty_subtable() {
     let dir = tempfile::tempdir().unwrap();
     let json_path = fixtures::create_all_empty_arrays_json(dir.path());
 
-    fixtures::exapump()
-        .timeout(std::time::Duration::from_secs(60))
-        .args([
-            "upload",
-            json_path.to_str().unwrap(),
-            "--table",
-            &format!("{schema}.orders"),
-            "--dsn",
-            fixtures::DOCKER_DSN,
-        ])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains(format!(
-            "Imported 0 rows into \"{schema}\".\"ORDERS_items_arr\""
-        )))
-        .stdout(predicate::str::contains(format!(
-            "Imported 2 rows into \"{schema}\".\"ORDERS\""
-        )));
+    upload_json(
+        &json_path,
+        &format!("{schema}.orders"),
+        fixtures::DOCKER_DSN,
+    )
+    .timeout(std::time::Duration::from_secs(60))
+    .assert()
+    .success()
+    .stdout(predicate::str::contains(format!(
+        "Imported 0 rows into \"{schema}\".\"ORDERS_items_arr\""
+    )))
+    .stdout(predicate::str::contains(format!(
+        "Imported 2 rows into \"{schema}\".\"ORDERS\""
+    )));
 
     assert_eq!(
         fixtures::count_rows(
@@ -391,10 +312,6 @@ async fn exasol_json_array_empty_in_every_document_creates_an_empty_subtable() {
         0,
         "no array element means no subtable row"
     );
-
-    let _ = conn
-        .execute_update(&format!("DROP SCHEMA {schema} CASCADE"))
-        .await;
 }
 
 #[tokio::test]
@@ -405,18 +322,14 @@ async fn exasol_json_nested_tables_carry_the_generated_key_columns() {
     let dir = tempfile::tempdir().unwrap();
     let json_path = fixtures::create_nested_json(dir.path());
 
-    fixtures::exapump()
-        .timeout(std::time::Duration::from_secs(60))
-        .args([
-            "upload",
-            json_path.to_str().unwrap(),
-            "--table",
-            &format!("{schema}.orders"),
-            "--dsn",
-            fixtures::DOCKER_DSN,
-        ])
-        .assert()
-        .success();
+    upload_json(
+        &json_path,
+        &format!("{schema}.orders"),
+        fixtures::DOCKER_DSN,
+    )
+    .timeout(std::time::Duration::from_secs(60))
+    .assert()
+    .success();
 
     assert_eq!(
         fixtures::count_rows(
@@ -457,10 +370,6 @@ async fn exasol_json_nested_tables_carry_the_generated_key_columns() {
         1,
         "_pos must hold the zero-based element position"
     );
-
-    let _ = conn
-        .execute_update(&format!("DROP SCHEMA {schema} CASCADE"))
-        .await;
 }
 
 #[tokio::test]
@@ -471,28 +380,20 @@ async fn exasol_ndjson_import_skips_blank_lines() {
     let dir = tempfile::tempdir().unwrap();
     let json_path = fixtures::create_ndjson(dir.path());
 
-    fixtures::exapump()
-        .timeout(std::time::Duration::from_secs(60))
-        .args([
-            "upload",
-            json_path.to_str().unwrap(),
-            "--table",
-            &format!("{schema}.events"),
-            "--dsn",
-            fixtures::DOCKER_DSN,
-        ])
-        .assert()
-        .success();
+    upload_json(
+        &json_path,
+        &format!("{schema}.events"),
+        fixtures::DOCKER_DSN,
+    )
+    .timeout(std::time::Duration::from_secs(60))
+    .assert()
+    .success();
 
     assert_eq!(
         fixtures::count_rows(&mut conn, &format!("SELECT 1 FROM {schema}.\"EVENTS\"")).await,
         3,
         "expected one row per non-empty line, with the blank line skipped"
     );
-
-    let _ = conn
-        .execute_update(&format!("DROP SCHEMA {schema} CASCADE"))
-        .await;
 }
 
 #[tokio::test]
@@ -503,28 +404,20 @@ async fn exasol_json_framing_is_detected_from_content_not_extension() {
     let dir = tempfile::tempdir().unwrap();
     let json_path = fixtures::create_ndjson_in_json_file(dir.path());
 
-    fixtures::exapump()
-        .timeout(std::time::Duration::from_secs(60))
-        .args([
-            "upload",
-            json_path.to_str().unwrap(),
-            "--table",
-            &format!("{schema}.events"),
-            "--dsn",
-            fixtures::DOCKER_DSN,
-        ])
-        .assert()
-        .success();
+    upload_json(
+        &json_path,
+        &format!("{schema}.events"),
+        fixtures::DOCKER_DSN,
+    )
+    .timeout(std::time::Duration::from_secs(60))
+    .assert()
+    .success();
 
     assert_eq!(
         fixtures::count_rows(&mut conn, &format!("SELECT 1 FROM {schema}.\"EVENTS\"")).await,
         3,
         "a .json file holding NDJSON must be read as NDJSON"
     );
-
-    let _ = conn
-        .execute_update(&format!("DROP SCHEMA {schema} CASCADE"))
-        .await;
 }
 
 #[tokio::test]
@@ -535,16 +428,8 @@ async fn exasol_json_mixed_scalar_types_get_alternate_columns() {
     let dir = tempfile::tempdir().unwrap();
     let json_path = fixtures::create_mixed_scalar_json(dir.path());
 
-    fixtures::exapump()
+    upload_json(&json_path, &format!("{schema}.mixed"), fixtures::DOCKER_DSN)
         .timeout(std::time::Duration::from_secs(60))
-        .args([
-            "upload",
-            json_path.to_str().unwrap(),
-            "--table",
-            &format!("{schema}.mixed"),
-            "--dsn",
-            fixtures::DOCKER_DSN,
-        ])
         .assert()
         .success();
 
@@ -572,10 +457,6 @@ async fn exasol_json_mixed_scalar_types_get_alternate_columns() {
         1,
         "a minority-type value belongs in its alternate column, with the primary NULL"
     );
-
-    let _ = conn
-        .execute_update(&format!("DROP SCHEMA {schema} CASCADE"))
-        .await;
 }
 
 #[tokio::test]
@@ -586,16 +467,8 @@ async fn exasol_json_explicit_null_stays_distinct_from_an_absent_property() {
     let dir = tempfile::tempdir().unwrap();
     let json_path = fixtures::create_explicit_null_json(dir.path());
 
-    fixtures::exapump()
+    upload_json(&json_path, &format!("{schema}.nulls"), fixtures::DOCKER_DSN)
         .timeout(std::time::Duration::from_secs(60))
-        .args([
-            "upload",
-            json_path.to_str().unwrap(),
-            "--table",
-            &format!("{schema}.nulls"),
-            "--dsn",
-            fixtures::DOCKER_DSN,
-        ])
         .assert()
         .success();
 
@@ -617,10 +490,6 @@ async fn exasol_json_explicit_null_stays_distinct_from_an_absent_property() {
         1,
         "the mask must be FALSE for the absent property"
     );
-
-    let _ = conn
-        .execute_update(&format!("DROP SCHEMA {schema} CASCADE"))
-        .await;
 }
 
 #[tokio::test]
@@ -632,20 +501,16 @@ async fn exasol_json_repeated_run_appends_to_existing_family() {
     let json_path = fixtures::create_flat_json(dir.path());
 
     for _ in 0..2 {
-        fixtures::exapump()
-            .timeout(std::time::Duration::from_secs(60))
-            .args([
-                "upload",
-                json_path.to_str().unwrap(),
-                "--table",
-                &format!("{schema}.orders"),
-                "--dsn",
-                fixtures::DOCKER_DSN,
-            ])
-            .assert()
-            .success()
-            .stderr(predicate::str::contains("_id"))
-            .stderr(predicate::str::contains("run"));
+        upload_json(
+            &json_path,
+            &format!("{schema}.orders"),
+            fixtures::DOCKER_DSN,
+        )
+        .timeout(std::time::Duration::from_secs(60))
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("_id"))
+        .stderr(predicate::str::contains("run"));
     }
 
     assert_eq!(
@@ -653,10 +518,6 @@ async fn exasol_json_repeated_run_appends_to_existing_family() {
         6,
         "a repeated run must append to the existing family"
     );
-
-    let _ = conn
-        .execute_update(&format!("DROP SCHEMA {schema} CASCADE"))
-        .await;
 }
 
 #[tokio::test]
@@ -669,16 +530,8 @@ async fn exasol_json_unqualified_table_uses_the_connection_schema() {
     let dsn =
         format!("exasol://sys:exasol@localhost:8563/{schema}?tls=true&validateservercertificate=0");
 
-    fixtures::exapump()
+    upload_json(&json_path, "orders", &dsn)
         .timeout(std::time::Duration::from_secs(60))
-        .args([
-            "upload",
-            json_path.to_str().unwrap(),
-            "--table",
-            "orders",
-            "--dsn",
-            &dsn,
-        ])
         .assert()
         .success()
         .stdout(predicate::str::contains(format!("\"{schema}\".\"ORDERS\"")));
@@ -688,10 +541,6 @@ async fn exasol_json_unqualified_table_uses_the_connection_schema() {
         3,
         "the family must land in the connection's default schema"
     );
-
-    let _ = conn
-        .execute_update(&format!("DROP SCHEMA {schema} CASCADE"))
-        .await;
 }
 
 #[tokio::test]
@@ -701,16 +550,8 @@ async fn exasol_json_unqualified_table_without_a_connection_schema_fails() {
     let dir = tempfile::tempdir().unwrap();
     let json_path = fixtures::create_flat_json(dir.path());
 
-    fixtures::exapump()
+    upload_json(&json_path, "orders", fixtures::DOCKER_DSN)
         .timeout(std::time::Duration::from_secs(60))
-        .args([
-            "upload",
-            json_path.to_str().unwrap(),
-            "--table",
-            "orders",
-            "--dsn",
-            fixtures::DOCKER_DSN,
-        ])
         .assert()
         .failure()
         .stderr(predicate::str::contains("schema"))
@@ -724,20 +565,19 @@ async fn exasol_json_missing_target_schema_fails() {
     let dir = tempfile::tempdir().unwrap();
     let json_path = fixtures::create_flat_json(dir.path());
 
-    fixtures::exapump()
-        .timeout(std::time::Duration::from_secs(60))
-        .args([
-            "upload",
-            json_path.to_str().unwrap(),
-            "--table",
-            "NO_SUCH_SCHEMA_XYZ.orders",
-            "--dsn",
-            fixtures::DOCKER_DSN,
-        ])
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("failed to open schema"))
-        .stderr(predicate::str::contains("NO_SUCH_SCHEMA_XYZ"));
+    upload_json(
+        &json_path,
+        "NO_SUCH_SCHEMA_XYZ.orders",
+        fixtures::DOCKER_DSN,
+    )
+    .timeout(std::time::Duration::from_secs(60))
+    .assert()
+    .failure()
+    .stderr(predicate::str::contains(
+        "failed to create \"NO_SUCH_SCHEMA_XYZ\".\"ORDERS\"",
+    ))
+    .stderr(predicate::str::contains("OPEN SCHEMA").not())
+    .stderr(predicate::str::contains("failed to open schema").not());
 }
 
 #[tokio::test]
@@ -752,25 +592,21 @@ async fn exasol_json_partial_family_failure_reports_loaded_tables() {
     let dir = tempfile::tempdir().unwrap();
     let json_path = fixtures::create_nested_json(dir.path());
 
-    fixtures::exapump()
-        .timeout(std::time::Duration::from_secs(60))
-        .args([
-            "upload",
-            json_path.to_str().unwrap(),
-            "--table",
-            &format!("{schema}.orders"),
-            "--dsn",
-            fixtures::DOCKER_DSN,
-        ])
-        .assert()
-        .failure()
-        .stdout(predicate::str::contains(format!(
-            "Imported 2 rows into \"{schema}\".\"ORDERS_customer\""
-        )))
-        .stdout(predicate::str::contains(format!(
-            "Imported 3 rows into \"{schema}\".\"ORDERS_items_arr\""
-        )))
-        .stderr(predicate::str::contains(format!("\"{schema}\".\"ORDERS\"")));
+    upload_json(
+        &json_path,
+        &format!("{schema}.orders"),
+        fixtures::DOCKER_DSN,
+    )
+    .timeout(std::time::Duration::from_secs(60))
+    .assert()
+    .failure()
+    .stdout(predicate::str::contains(format!(
+        "Imported 2 rows into \"{schema}\".\"ORDERS_customer\""
+    )))
+    .stdout(predicate::str::contains(format!(
+        "Imported 3 rows into \"{schema}\".\"ORDERS_items_arr\""
+    )))
+    .stderr(predicate::str::contains(format!("\"{schema}\".\"ORDERS\"")));
 
     assert_eq!(
         fixtures::count_rows(
@@ -781,10 +617,6 @@ async fn exasol_json_partial_family_failure_reports_loaded_tables() {
         2,
         "the tables loaded before the failure must not be rolled back"
     );
-
-    let _ = conn
-        .execute_update(&format!("DROP SCHEMA {schema} CASCADE"))
-        .await;
 }
 
 #[tokio::test]
@@ -795,16 +627,8 @@ async fn exasol_json_multi_level_nesting_creates_all_subtables() {
     let dir = tempfile::tempdir().unwrap();
     let json_path = fixtures::create_deeply_nested_json(dir.path());
 
-    fixtures::exapump()
+    upload_json(&json_path, &format!("{schema}.deep"), fixtures::DOCKER_DSN)
         .timeout(std::time::Duration::from_secs(60))
-        .args([
-            "upload",
-            json_path.to_str().unwrap(),
-            "--table",
-            &format!("{schema}.deep"),
-            "--dsn",
-            fixtures::DOCKER_DSN,
-        ])
         .assert()
         .success()
         .stdout(predicate::str::contains(format!(
@@ -919,10 +743,6 @@ async fn exasol_json_multi_level_nesting_creates_all_subtables() {
         1,
         "item B2 must have its 1 tag linked by _parent"
     );
-
-    let _ = conn
-        .execute_update(&format!("DROP SCHEMA {schema} CASCADE"))
-        .await;
 }
 
 #[tokio::test]
@@ -933,16 +753,8 @@ async fn exasol_json_array_of_arrays_creates_nested_subtables() {
     let dir = tempfile::tempdir().unwrap();
     let json_path = fixtures::create_array_of_arrays_json(dir.path());
 
-    fixtures::exapump()
+    upload_json(&json_path, &format!("{schema}.mat"), fixtures::DOCKER_DSN)
         .timeout(std::time::Duration::from_secs(60))
-        .args([
-            "upload",
-            json_path.to_str().unwrap(),
-            "--table",
-            &format!("{schema}.mat"),
-            "--dsn",
-            fixtures::DOCKER_DSN,
-        ])
         .assert()
         .success()
         .stdout(predicate::str::contains(format!(
@@ -1067,8 +879,231 @@ async fn exasol_json_array_of_arrays_creates_nested_subtables() {
         1,
         "the [6] sub-array must have 1 leaf value row linked by _parent"
     );
+}
 
-    let _ = conn
-        .execute_update(&format!("DROP SCHEMA {schema} CASCADE"))
-        .await;
+#[tokio::test]
+async fn exasol_json_reordered_properties_keep_each_value_in_its_column() {
+    fixtures::require_exasol!();
+
+    let (mut conn, schema) = fixtures::setup_exasol_schema("EXAPUMP_JSON").await;
+    let dir = tempfile::tempdir().unwrap();
+    let (first, second) = fixtures::create_reordered_property_files(dir.path());
+
+    for path in [&first, &second] {
+        upload_json(path, &format!("{schema}.reorder"), fixtures::DOCKER_DSN)
+            .timeout(std::time::Duration::from_secs(60))
+            .assert()
+            .success();
+    }
+
+    assert_eq!(
+        fixtures::count_rows(
+            &mut conn,
+            &format!("SELECT 1 FROM {schema}.\"REORDER\" WHERE \"a\" = 'x2' AND \"b\" = 'y2'"),
+        )
+        .await,
+        1,
+        "the second file lists the same two properties in the other order, so an import that \
+         places values by position swaps them between two same-typed columns"
+    );
+    assert_eq!(
+        fixtures::count_rows(&mut conn, &format!("SELECT 1 FROM {schema}.\"REORDER\"")).await,
+        2,
+        "each file must contribute one row"
+    );
+}
+
+#[tokio::test]
+async fn exasol_json_second_file_with_an_unknown_column_fails() {
+    fixtures::require_exasol!();
+
+    let (mut conn, schema) = fixtures::setup_exasol_schema("EXAPUMP_JSON").await;
+    let dir = tempfile::tempdir().unwrap();
+    let (first, second) = fixtures::create_unknown_column_files(dir.path());
+
+    upload_json(&first, &format!("{schema}.mismatch"), fixtures::DOCKER_DSN)
+        .timeout(std::time::Duration::from_secs(60))
+        .assert()
+        .success();
+
+    upload_json(&second, &format!("{schema}.mismatch"), fixtures::DOCKER_DSN)
+        .timeout(std::time::Duration::from_secs(60))
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(format!(
+            "\"{schema}\".\"MISMATCH\""
+        )))
+        .stderr(predicate::str::contains("\"c\""));
+
+    assert_eq!(
+        fixtures::count_rows(
+            &mut conn,
+            &format!("SELECT 1 FROM {schema}.\"MISMATCH\" WHERE \"a\" = 1 AND \"b\" = 'from_b'"),
+        )
+        .await,
+        1,
+        "the row the first file loaded must survive the failed second upload unchanged"
+    );
+    assert_eq!(
+        fixtures::count_rows(&mut conn, &format!("SELECT 1 FROM {schema}.\"MISMATCH\"")).await,
+        1,
+        "a batch naming a column the table does not hold must load no row at all"
+    );
+}
+
+#[tokio::test]
+async fn exasol_json_second_file_omitting_a_column_loads_null() {
+    fixtures::require_exasol!();
+
+    let (mut conn, schema) = fixtures::setup_exasol_schema("EXAPUMP_JSON").await;
+    let dir = tempfile::tempdir().unwrap();
+    let (first, second) = fixtures::create_omitted_column_files(dir.path());
+
+    for path in [&first, &second] {
+        upload_json(path, &format!("{schema}.optional"), fixtures::DOCKER_DSN)
+            .timeout(std::time::Duration::from_secs(60))
+            .assert()
+            .success();
+    }
+
+    assert_eq!(
+        fixtures::count_rows(
+            &mut conn,
+            &format!("SELECT 1 FROM {schema}.\"OPTIONAL\" WHERE \"a\" = 3 AND \"b\" IS NULL"),
+        )
+        .await,
+        1,
+        "a column the second file never names must load NULL, not fail the import"
+    );
+    assert_eq!(
+        fixtures::count_rows(
+            &mut conn,
+            &format!(
+                "SELECT 1 FROM {schema}.\"OPTIONAL\" \
+                 WHERE (\"a\" = 1 AND \"b\" = 'x') OR (\"a\" = 2 AND \"b\" = 'y')"
+            ),
+        )
+        .await,
+        2,
+        "the rows the first file loaded must keep their original values"
+    );
+    assert_eq!(
+        fixtures::count_rows(&mut conn, &format!("SELECT 1 FROM {schema}.\"OPTIONAL\"")).await,
+        3,
+        "expected two rows from the first file and one from the second"
+    );
+}
+
+#[test]
+fn colliding_table_names_are_rejected() {
+    let dir = tempfile::tempdir().unwrap();
+    let json_path = fixtures::create_colliding_paths_json(dir.path());
+
+    for extra in [&[][..], &["--dry-run"][..]] {
+        upload_json(&json_path, "raw.col", fixtures::DUMMY_DSN)
+            .args(extra)
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("COL_customer_address"))
+            .stderr(predicate::str::contains(
+                "customer.address and customer_address",
+            ));
+    }
+}
+
+#[test]
+fn nested_object_with_no_properties_is_rejected() {
+    let dir = tempfile::tempdir().unwrap();
+    let json_path = fixtures::create_hollow_object_json(dir.path());
+
+    upload_json(&json_path, "raw.hollow", fixtures::DUMMY_DSN)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("no column"));
+}
+
+#[tokio::test]
+async fn exasol_jsonl_extension_imports_one_row_per_line() {
+    fixtures::require_exasol!();
+
+    let (mut conn, schema) = fixtures::setup_exasol_schema("EXAPUMP_JSON").await;
+    let dir = tempfile::tempdir().unwrap();
+    let jsonl_path = fixtures::create_jsonl(dir.path());
+
+    upload_json(
+        &jsonl_path,
+        &format!("{schema}.events"),
+        fixtures::DOCKER_DSN,
+    )
+    .timeout(std::time::Duration::from_secs(60))
+    .assert()
+    .success()
+    .stderr(predicate::str::contains("not supported").not());
+
+    assert_eq!(
+        fixtures::count_rows(&mut conn, &format!("SELECT 1 FROM {schema}.\"EVENTS\"")).await,
+        3,
+        "the .jsonl extension must import one row per non-empty line"
+    );
+}
+
+#[test]
+fn single_multi_line_json_object_is_rejected() {
+    let dir = tempfile::tempdir().unwrap();
+    let json_path = fixtures::create_multi_line_object_json(dir.path());
+
+    upload_json(&json_path, "raw.single", fixtures::DUMMY_DSN)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("JSON array of objects"))
+        .stderr(predicate::str::contains("one JSON object per line"));
+}
+
+#[test]
+fn malformed_ndjson_line_is_reported_without_the_framing_diagnosis() {
+    let dir = tempfile::tempdir().unwrap();
+    let ndjson_path = fixtures::create_malformed_ndjson(dir.path());
+
+    upload_json(&ndjson_path, "raw.malformed", fixtures::DUMMY_DSN)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Line 2"))
+        .stderr(predicate::str::contains("neither a JSON array of objects").not());
+}
+
+#[tokio::test]
+async fn exasol_json_nineteen_digit_integer_imports_unchanged() {
+    fixtures::require_exasol!();
+
+    let (mut conn, schema) = fixtures::setup_exasol_schema("EXAPUMP_JSON").await;
+    let dir = tempfile::tempdir().unwrap();
+    let json_path = fixtures::create_wide_integer_json(dir.path());
+
+    upload_json(&json_path, &format!("{schema}.ids"), fixtures::DOCKER_DSN)
+        .timeout(std::time::Duration::from_secs(60))
+        .assert()
+        .success();
+
+    assert_eq!(
+        fixtures::count_rows(
+            &mut conn,
+            &format!(
+                "SELECT 1 FROM SYS.EXA_ALL_COLUMNS \
+                 WHERE COLUMN_SCHEMA = '{schema}' AND COLUMN_TABLE = 'IDS' \
+                   AND COLUMN_NAME = 'id' AND COLUMN_TYPE = 'DECIMAL(19,0)'"
+            ),
+        )
+        .await,
+        1,
+        "an integer column must be wide enough for the whole 64-bit signed range"
+    );
+    assert_eq!(
+        fixtures::count_rows(
+            &mut conn,
+            &format!("SELECT 1 FROM {schema}.\"IDS\" WHERE \"id\" = 1234567890123456789"),
+        )
+        .await,
+        1,
+        "a 19-digit integer must survive the load unchanged"
+    );
 }

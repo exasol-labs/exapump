@@ -301,10 +301,6 @@ async fn exasol_csv_import_to_existing_table() {
     let batches = rs.fetch_all().await.unwrap();
     let row_count: usize = batches.iter().map(|b| b.num_rows()).sum();
     assert_eq!(row_count, 3, "expected 3 rows in CSV_EXISTING");
-
-    let _ = conn
-        .execute_update(&format!("DROP SCHEMA {schema_name} CASCADE"))
-        .await;
 }
 
 #[tokio::test]
@@ -340,17 +336,13 @@ async fn exasol_csv_import_with_auto_table_creation() {
     let batches = rs.fetch_all().await.unwrap();
     let row_count: usize = batches.iter().map(|b| b.num_rows()).sum();
     assert_eq!(row_count, 3, "expected 3 rows in CSV_AUTO_CREATED");
-
-    let _ = conn
-        .execute_update(&format!("DROP SCHEMA {schema_name} CASCADE"))
-        .await;
 }
 
 #[tokio::test]
 async fn exasol_csv_import_prints_row_count() {
     fixtures::require_exasol!();
 
-    let (mut conn, schema_name) = fixtures::setup_exasol_schema("EXAPUMP_CSV").await;
+    let (_conn, schema_name) = fixtures::setup_exasol_schema("EXAPUMP_CSV").await;
 
     let dir = tempfile::tempdir().unwrap();
     let csv_path = fixtures::create_csv_with_content(
@@ -372,17 +364,13 @@ async fn exasol_csv_import_prints_row_count() {
         .assert()
         .success()
         .stdout(predicate::str::contains("Imported 2 rows"));
-
-    let _ = conn
-        .execute_update(&format!("DROP SCHEMA {schema_name} CASCADE"))
-        .await;
 }
 
 #[tokio::test]
 async fn exasol_csv_import_with_custom_delimiter() {
     fixtures::require_exasol!();
 
-    let (mut conn, schema_name) = fixtures::setup_exasol_schema("EXAPUMP_CSV").await;
+    let (_conn, schema_name) = fixtures::setup_exasol_schema("EXAPUMP_CSV").await;
 
     let dir = tempfile::tempdir().unwrap();
     let csv_path =
@@ -403,17 +391,13 @@ async fn exasol_csv_import_with_custom_delimiter() {
         .assert()
         .success()
         .stdout(predicate::str::contains("Imported 2 rows"));
-
-    let _ = conn
-        .execute_update(&format!("DROP SCHEMA {schema_name} CASCADE"))
-        .await;
 }
 
 #[tokio::test]
 async fn exasol_csv_import_with_no_header() {
     fixtures::require_exasol!();
 
-    let (mut conn, schema_name) = fixtures::setup_exasol_schema("EXAPUMP_CSV").await;
+    let (_conn, schema_name) = fixtures::setup_exasol_schema("EXAPUMP_CSV").await;
 
     let dir = tempfile::tempdir().unwrap();
     let csv_path =
@@ -433,17 +417,13 @@ async fn exasol_csv_import_with_no_header() {
         .assert()
         .success()
         .stdout(predicate::str::contains("Imported 2 rows"));
-
-    let _ = conn
-        .execute_update(&format!("DROP SCHEMA {schema_name} CASCADE"))
-        .await;
 }
 
 #[tokio::test]
 async fn exasol_csv_flags_ignored_for_parquet() {
     fixtures::require_exasol!();
 
-    let (mut conn, schema_name) = fixtures::setup_exasol_schema("EXAPUMP_CSV").await;
+    let (_conn, schema_name) = fixtures::setup_exasol_schema("EXAPUMP_CSV").await;
 
     let dir = tempfile::tempdir().unwrap();
     let parquet_path = fixtures::create_test_parquet(dir.path());
@@ -464,8 +444,4 @@ async fn exasol_csv_flags_ignored_for_parquet() {
         .success()
         .stdout(predicate::str::contains("Imported"))
         .stdout(predicate::str::contains("rows"));
-
-    let _ = conn
-        .execute_update(&format!("DROP SCHEMA {schema_name} CASCADE"))
-        .await;
 }

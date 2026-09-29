@@ -49,4 +49,4 @@ Depend on `json_tables_core` only. Reimplement the file reading, connection hand
 
 ### Consequences
 
-exapump owns file reading, connection handling, the Arrow conversion, and the import. `json_tables_core` owns every decision about which tables exist, which columns they carry, and which DDL describes them.
+exapump owns file reading, framing, connection handling, the SQL it runs, the Arrow conversion, and the import. `json_tables_core` owns which tables exist and which columns they carry.
