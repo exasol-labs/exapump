@@ -1,5 +1,7 @@
 # CLAUDE.md
 
+Spec-driven development with mission in: @specs/mission.md
+
 ## Testing
 
 Integration and manual tests must always run against a local Exasol Docker database.
