@@ -19,6 +19,10 @@ Project specifics:
 
 - `cargo fmt --all` and `cargo clippy --all-targets` must pass with zero warnings before committing.
 
+## Code style
+
+- A comment states a non-obvious why: an invariant, an external-system quirk, or a spec or issue constraint. Keep it to 1 or 2 lines. Never restate the code, narrate history, or add banners. Update or delete comments when behavior changes.
+
 ## Licenses
 
 A new dependency's license must appear in both `deny.toml` (`[licenses].allow`) and `about.toml` (`accepted`). Keep the two files in sync.
