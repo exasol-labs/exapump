@@ -24,30 +24,4 @@ Extend `split_statements` with a sixth `ScanState::ScriptBody` state. A word-bou
 
 ### Consequences
 
-`CREATE … SCRIPT … AS` blocks using the exaplus `/` terminator are handled transparently by the splitter. No user-facing CLI change is required. The existing quote and comment states are unaffected. `FUNCTION … END` blocks remain out of scope and are not handled by this change.
-
-## ADR: Lone `/` line is the only script-body terminator; FUNCTION … END is out of scope
-
-**ID:** lone-slash-line-terminates-script-body
-**Plan:** fix-issues-22-23-release-0.10.1
-**Status:** Accepted
-
-### Context
-
-Once a `ScriptBody` state was introduced, the terminator pattern needed to be defined. Exasol scripts can also contain `FUNCTION … END` and other block constructs. The defect (#23) was specifically about `CREATE … SCRIPT` bodies using the exaplus `/`-on-a-line-by-itself convention.
-
-### Decision
-
-A line containing only `/` (after trim), followed by newline or EOF, terminates a script body. `FUNCTION … END` blocks are explicitly not handled by this fix.
-
-### Options Considered
-
-| Option | Verdict |
-|--------|---------|
-| Use lone `/` line as the sole terminator | ✓ Chosen — matches exaplus convention; scope is kept tight to the reported defect |
-| Also match an `END` keyword to balance `FUNCTION … END` blocks | ✗ Rejected — broader than the bug; `END` appears in many non-block contexts and balancing is error-prone |
-| Allow a configurable delimiter | ✗ Rejected — adds configuration surface; the `/` convention is standard for Exasol tooling |
-
-### Consequences
-
-The splitter correctly handles the dominant `CREATE … SCRIPT` use-case reported in issue #23. `FUNCTION … END` blocks remain a potential future extension but are not addressed here, keeping the change minimal and the correctness scope well-defined.
+`CREATE … SCRIPT … AS` blocks using the exaplus `/` terminator are handled transparently by the splitter. No user-facing CLI change is required. The existing quote and comment states are unaffected. `FUNCTION … END` blocks remain out of scope and are not handled by this change. A line containing only `/` (after trim) is the sole script-body terminator, and no configurable delimiter is offered.

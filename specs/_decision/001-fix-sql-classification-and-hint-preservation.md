@@ -25,29 +25,3 @@ Remove the `strip_comments(&sql_input)` pre-pass in `sql.rs::run`. Make `split_s
 ### Consequences
 
 The principle "what the user wrote is what Exasol sees" is enforced by the architecture. `split_statements` now requires a comment-aware four-state scanner to correctly identify top-level semicolons without rewriting input. All downstream consumers of `split_statements` receive the original statement text.
-
-## ADR: Add `StatementType::Execute` variant and dispatch at runtime on `result_set.row_count()`
-
-**ID:** add-statementtype-execute-runtime-dispatch
-**Plan:** fix-sql-classification-and-hint-preservation
-**Status:** Accepted
-
-### Context
-
-`EXECUTE SCRIPT` statements were falling into the `Ddl` arm of the statement dispatcher, which calls `execute_update()`. When the script is defined with `RETURNS TABLE`, exarrow-rs's `execute_update` requires the server to return a row count — which fails because the script returns a result set instead. The statement type cannot be determined statically: whether a script returns rows depends on its server-side definition.
-
-### Decision
-
-Introduce a new `Execute` variant in `StatementType` mapped from the `EXECUTE` keyword. In both `sql.rs::run` and `interactive.rs::execute_statement`, call `conn.execute(stmt)` for the `Execute` arm and branch on `result_set.row_count().is_some()`: if `Some`, print `OK`; otherwise `fetch_all` and render via the same code path as the `Query` arm.
-
-### Options Considered
-
-| Option | Verdict |
-|--------|---------|
-| Add `StatementType::Execute` variant; runtime-branch on `row_count()` | ✓ Chosen — minimal-blast-radius change; existing Dml/Ddl paths stay intact |
-| Always use `conn.execute` for every statement and branch on `row_count()` globally | ✗ Rejected — Dml/Ddl rely on the existing row-count contract for status-line formatting; a wholesale switch risks regressing those messages |
-| Inspect SQL for `RETURNS TABLE` at the call site to determine dispatch | ✗ Rejected — script body is server-side; cannot know what it returns without executing |
-
-### Consequences
-
-`EXECUTE SCRIPT` is modelled as its own polymorphic variant, reflecting that it is genuinely the ambiguous case in Exasol SQL. The existing `Query`, `Dml`, and `Ddl` paths are unchanged. Both runners (`sql.rs` and `interactive.rs`) share the same branching logic.
