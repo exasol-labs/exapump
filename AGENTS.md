@@ -18,6 +18,7 @@ Project specifics:
 ## Code quality
 
 - `cargo fmt --all` and `cargo clippy --all-targets` must pass with zero warnings before committing.
+- Fix `rust:S3776` by extracting pure functions and injecting a prompter. Add no suppressions and do not change the threshold.
 
 ## Code style
 

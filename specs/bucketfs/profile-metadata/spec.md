@@ -22,7 +22,7 @@
 ### Scenario: Docker preset excludes BucketFS
 
 * *GIVEN* exapump is installed
-* *WHEN* the user runs `exapump profile add docker`
+* *WHEN* the user runs `exapump profile add default`
 * *THEN* the docker preset MUST NOT include BucketFS fields
 * *AND* the profile MUST still be valid for database operations
 
