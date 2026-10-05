@@ -32,10 +32,11 @@ There is no simple `command -> done` workflow for these common cases. Every opti
 3. **Dry-run mode** — preview the inferred schema and planned CREATE TABLE without executing
 4. **Single-command export** — export a table or SQL query result to a local CSV or Parquet file, optionally split by row count or file size, with a timeout for CSV export
 5. **SQL execution** — run one or more `;`-separated SQL statements (DDL/DML/query), given as an argument or on stdin, and get results as CSV or JSON
-6. **BucketFS operations** — upload, download, list, and delete files in Exasol's BucketFS, addressed by `bfs://` or `bfss://` URIs
-7. **Profile-based connection config** — named connection profiles (`profile list/add/show`) resolved alongside `--dsn`/`EXAPUMP_DSN`, with certificate fingerprint pinning, `.env` loading (priority: flag > shell env > `.env` > profile), and a `--transport native|websocket` choice
-8. **Interactive SQL shell** — a REPL (`exapump interactive`) with dot-commands, multi-statement script execution, and table-formatted output
-9. **Readiness polling** — `exapump wait` blocks until a target Exasol instance is reachable or a named Docker container is running, for CI/E2E setup
+6. **BucketFS operations** — upload, download, list, and delete files in Exasol's BucketFS. `cp` accepts `bfs://` or `bfss://` URIs (`bfss://` implies TLS), while `ls` and `rm` take plain paths. Connection settings resolve from flags, environment, or a profile, and the read and write passwords fall back in the order read, write, anonymous
+7. **Profile-based connection config** — named connection profiles (`profile list/add/show`) resolved alongside `--dsn`/`EXAPUMP_DSN`, with BucketFS host, bucket, and TLS fields, Docker presets for `profile add`, a warning when the config file permissions are too broad, certificate fingerprint pinning, `.env` loading (priority: flag > shell env > `.env` > profile), and a `--transport native|websocket` choice
+8. **Contextual SQL errors** — SQL failures print an error with a hint, such as a syntax pointer, a missing object, or missing privileges
+9. **Interactive SQL shell** — a REPL (`exapump interactive`) with dot-commands, multi-statement script execution, and table-formatted output
+10. **Readiness polling** — `exapump wait` blocks until the target Exasol instance accepts a TCP connection and answers `SELECT 1`, for CI/E2E setup. A named Docker container is only a liveness guard: `wait` fails fast with exit code 3 when it stops running
 
 ## Out of Scope
 

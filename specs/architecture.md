@@ -44,10 +44,10 @@ args, env, .env
 - local file -> format -> exarrow-rs schema inference -> upload: a CSV or Parquet file becomes an inferred table schema and a `CREATE TABLE IF NOT EXISTS` statement
 - upload -> exarrow-rs import -> Exasol table: file rows load into the target table and the imported row count prints to stdout
 - Exasol table or query -> exarrow-rs export -> export -> local file: rows stream as CSV bytes or Arrow record batches and land in one CSV or Parquet file
-- exarrow-rs CSV stream -> split -> local files: with `--max-rows-per-file` or `--max-file-size`, rows spread across `<stem>_NNN.<ext>` files, each with its own header
+- exarrow-rs CSV stream -> split -> local files: with `--max-rows-per-file` or `--max-file-size`, rows spread across `<stem>_NNN.<ext>` files, each with its own header unless `--no-header` is set
 - argument or stdin -> sql statement splitter -> exarrow-rs execute -> stdout: each statement runs in order, result sets print as CSV or JSON, and status lines and a summary print to stderr
 - terminal line -> interactive buffer -> sql execution -> stdout: a statement that ends in `;` runs and prints as a table, CSV, or JSON
-- flags, env, `.env`, config.toml -> connection -> exarrow-rs driver: a resolved DSN string opens one connection per command
+- flags, env, `.env`, config.toml -> connection -> exarrow-rs driver: a resolved DSN string configures the exarrow-rs connection that a command opens (`wait` opens a new one per SQL probe)
 - local file or BucketFS path -> bucketfs -> HTTP(S) GET, PUT, or DELETE -> BucketFS or local file: file bytes move between disk and the bucket
 - resolved DSN -> wait -> TCP probe then `SELECT 1` -> exit code: readiness becomes exit code 0, 1, 2, or 3
 
