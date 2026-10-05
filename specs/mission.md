@@ -22,22 +22,21 @@ There is no simple `command -> done` workflow for these common cases. Every opti
 
 | Persona | Goal | Key Workflow |
 |---------|------|--------------|
-| Data Engineer | Quickly ingest files from Spark jobs, data lakes, or pipeline outputs into Exasol; export query results to Parquet for downstream processing | `exapump upload *.parquet --table schema.table` after a batch job completes; `exapump export --query 'SELECT ...' --output results.parquet --format parquet` for pipeline handoff |
+| Data Engineer | Quickly ingest files from Spark jobs, data lakes, or pipeline outputs into Exasol; export query results to Parquet for downstream processing | `exapump upload data.parquet --table schema.table` after a batch job completes; `exapump export --query 'SELECT ...' --output results.parquet --format parquet` for pipeline handoff |
 | DBA / Analyst | Ad-hoc data loading, exports, and SQL without writing code or deploying tools | `exapump upload export.csv --table staging.imports --dry-run` to preview, then load; `exapump sql 'SELECT count(*) FROM t' --dsn ...` for quick checks |
 
 ## Core Capabilities
 
-1. **Single-command upload** — load CSV or Parquet files into an Exasol table with one command
+1. **Single-command upload** — load a CSV or Parquet file into an Exasol table with one command
 2. **Auto table creation** — infer schema from file metadata/sampling and create the target table if it doesn't exist
-3. **Glob and directory support** — load all matching files from a path pattern in a single invocation
-4. **Parallel multi-file import** — leverage exarrow-rs parallel connections for high-throughput transfer
-5. **Dry-run mode** — preview the inferred schema and planned CREATE TABLE without executing
-6. **Single-command export** — export a table or SQL query result to a local CSV or Parquet file
-7. **SQL execution** — run one or more `;`-separated SQL statements (DDL/DML/query) and get results as CSV or JSON
-8. **BucketFS operations** — upload, list, and delete files directly in Exasol's BucketFS
-9. **Profile-based connection config** — named connection profiles in a config file, resolved alongside `--dsn`/`EXAPUMP_DSN`
-10. **Interactive SQL shell** — a REPL (`exapump interactive`) with dot-commands, multi-statement script execution, and table-formatted output
-11. **Readiness polling** — `exapump wait` blocks until a target Exasol instance is reachable, for CI/E2E setup
+3. **Dry-run mode** — preview the inferred schema and planned CREATE TABLE without executing
+4. **Single-command export** — export a table or SQL query result to a local CSV or Parquet file, optionally split by row count or file size, with a timeout for CSV export
+5. **SQL execution** — run one or more `;`-separated SQL statements (DDL/DML/query), given as an argument or on stdin, and get results as CSV or JSON
+6. **BucketFS operations** — upload, download, list, and delete files in Exasol's BucketFS. `cp` accepts `bfs://` or `bfss://` URIs (`bfss://` implies TLS), while `ls` and `rm` take plain paths. Connection settings resolve from flags, environment, or a profile, and the read and write passwords fall back in the order read, write, anonymous
+7. **Profile-based connection config** — named connection profiles (`profile list/add/show`) resolved alongside `--dsn`/`EXAPUMP_DSN`, with BucketFS host, bucket, and TLS fields, Docker presets for `profile add`, a warning when the config file permissions are too broad, certificate fingerprint pinning, `.env` loading (priority: flag > shell env > `.env` > profile), and a `--transport native|websocket` choice
+8. **Contextual SQL errors** — SQL failures print an error with a hint, such as a syntax pointer, a missing object, or missing privileges
+9. **Interactive SQL shell** — a REPL (`exapump interactive`) with dot-commands, multi-statement script execution, and table-formatted output
+10. **Readiness polling** — `exapump wait` blocks until the target Exasol instance accepts a TCP connection and answers `SELECT 1`, for CI/E2E setup. A named Docker container is only a liveness guard: `wait` fails fast with exit code 3 when it stops running
 
 ## Out of Scope
 
@@ -47,6 +46,8 @@ There is no simple `command -> done` workflow for these common cases. Every opti
 - Database-to-database replication
 - Streaming/real-time ingestion (exapump is batch-oriented)
 
+Architecture: see specs/architecture.md.
+
 ## Domain Glossary
 
 Standard Exasol and Arrow terminology applies. No project-specific redefinitions.
@@ -55,7 +56,7 @@ Standard Exasol and Arrow terminology applies. No project-specific redefinitions
 |------|------------|
 | DSN | Data Source Name — connection string in the format `exasol://user:pwd@host:port` |
 | Schema inference | Detecting column names, types, and nullability from file metadata (Parquet) or row sampling (CSV) |
-| exarrow-rs | The underlying Rust library providing Arrow-native Exasol connectivity, schema inference, type mapping, and parallel transfer |
+| exarrow-rs | The underlying Rust library providing Arrow-native Exasol connectivity, schema inference, type mapping, and SQL execution |
 | BucketFS | Exasol's built-in distributed file storage, used for staging files (e.g. Script Language Containers) accessible to the database |
 | Profile | A named connection configuration (host, user, credentials, TLS settings) stored in the exapump config file |
 
@@ -67,7 +68,7 @@ Standard Exasol and Arrow terminology applies. No project-specific redefinitions
 |-------|------------|---------|
 | Language | Rust | Systems language for single-binary distribution |
 | CLI framework | clap (derive) | Argument parsing and help generation |
-| Core library | exarrow-rs (crates.io) | Exasol connectivity, Arrow-native import/export, schema inference, parallel transfer, SQL execution |
+| Core library | exarrow-rs (crates.io) | Exasol connectivity, Arrow-native import/export, schema inference, SQL execution |
 | Testing | cargo test | Built-in unit and integration tests |
 
 ## Commands
@@ -111,57 +112,3 @@ exapump/
 ├── Cargo.toml          # Dependencies and metadata
 └── .gitignore
 ```
-
-## Architecture
-
-**Thin CLI wrapper** over exarrow-rs. exapump owns only CLI-specific concerns:
-
-```
-User → [CLI (clap)] → [Orchestration] → [exarrow-rs: connect, infer, import/export/query]
-```
-
-- **CLI layer**: Argument parsing, validation, environment variable resolution
-- **Orchestration**: File glob expansion, format detection, progress display, error reporting
-- **exarrow-rs**: Connection management, schema inference, type mapping, parallel data transfer, SQL execution
-
-exapump contains minimal business logic — it translates CLI intent into exarrow-rs API calls and presents results to the user.
-
-### Export Command
-
-```bash
-exapump export --table schema.table --output data.csv --format csv --dsn ...
-exapump export --query 'SELECT * FROM t WHERE ...' --output results.parquet --format parquet --dsn ...
-```
-
-- Source: `--table` or `--query` (mutually exclusive)
-- Output: `--output <file>` (required)
-- Format: `--format csv|parquet` (required, explicit)
-- DSN: same `--dsn` / `EXAPUMP_DSN` pattern as upload
-
-### SQL Command
-
-```bash
-exapump sql 'CREATE TABLE t(id INT)' --dsn ...
-exapump sql 'SELECT * FROM t' --dsn ... --format csv
-exapump sql 'SELECT * FROM t' --dsn ... --format json
-```
-
-- SQL as positional argument
-- Output format: `--format csv|json` (default: csv)
-- DDL/DML: prints affected row count or "OK"
-- SELECT: streams result set to stdout in chosen format
-- Not a REPL: one statement per invocation
-
-## Constraints
-
-- **Distribution**: Single binary with no bundled runtime dependencies. It links dynamically against the host's system glibc.
-- **Linux glibc floor**: Linux release binaries target glibc 2.28 (AlmaLinux 8 / manylinux_2_28 baseline), so they run on enterprise distributions such as SLES 15 SP7.
-- **Platforms**: Linux (x86_64, aarch64), macOS (x86_64, aarch64). Windows via WSL only.
-- **Performance**: Throughput bounded by exarrow-rs and network. exapump itself must add negligible overhead.
-
-## External Dependencies
-
-| Service | Purpose | Failure Impact |
-|---------|---------|----------------|
-| Exasol database | Target for data import/export and SQL execution | Cannot function — all operations require a live Exasol connection |
-| crates.io (build-time) | Fetch exarrow-rs and other dependencies | Cannot build — resolved at compile time only |
