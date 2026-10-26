@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.13.1
+
+- **Security.** Stop trusting the eight eMudhra intermediate CA certificates whose private keys were found to be recoverable (CVE-2026-111943). Bump `rustls-webpki` to 0.103.16, which rejects these intermediates during path building, and `webpki-roots` to 1.0.11, which drops `emSign ECC Root CA - G3` from the root store compiled into exapump for BucketFS HTTPS. Exasol SQL connections use the OS trust store, so keep the host's `ca-certificates` package up to date as well
+- Bump exarrow-rs to 0.29.0 and arrow/parquet to 59
+
 ## 0.13.0
 
 - `exapump bucketfs <ls|cp|rm>` now treats `~/.exapump/config.toml` as a fallback value source instead of a precondition: `--bfs-host` together with `--bfs-write-password` or `--bfs-read-password` builds the connection on its own and needs no profile, so the command works on a machine that has no config file (#46)
