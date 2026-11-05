@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.14.0
+
+- Bump exarrow-rs to 0.32.0, with `arrow`, `arrow-csv`, `arrow-json`, and `parquet` moving to 60; Cargo builds enable the new opt-in exarrow-rs `parquet` feature
+- **Breaking.** On the native transport, a `TIMESTAMP WITH LOCAL TIME ZONE` column now has the Arrow type `Timestamp(Microsecond, "UTC")` and returns UTC instants. In a session whose time zone is not `UTC`, values differ from earlier releases and from the WebSocket transport
+
 ## 0.13.0
 
 - `exapump bucketfs <ls|cp|rm>` now treats `~/.exapump/config.toml` as a fallback value source instead of a precondition: `--bfs-host` together with `--bfs-write-password` or `--bfs-read-password` builds the connection on its own and needs no profile, so the command works on a machine that has no config file (#46)
