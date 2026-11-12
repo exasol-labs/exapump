@@ -79,7 +79,8 @@ async fn parquet_import(path: &std::path::Path, args: &UploadArgs) -> anyhow::Re
 
     let options = exarrow_rs::ParquetImportOptions::new()
         .with_column_name_mode(exarrow_rs::types::ColumnNameMode::Quoted)
-        .with_native_parquet(Some(false));
+        .with_native_parquet(Some(false))
+        .use_tls(conn.params().use_tls);
 
     let rows = conn.import_from_parquet(&args.table, path, options).await?;
 
@@ -105,7 +106,8 @@ async fn csv_import(path: &std::path::Path, args: &UploadArgs) -> anyhow::Result
     let mut import_options = exarrow_rs::CsvImportOptions::new()
         .column_separator(args.delimiter)
         .column_delimiter(args.quote)
-        .skip_rows(if args.no_header { 0 } else { 1 });
+        .skip_rows(if args.no_header { 0 } else { 1 })
+        .use_tls(conn.params().use_tls);
 
     if !args.null_value.is_empty() {
         import_options = import_options.null_value(&args.null_value);
