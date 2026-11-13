@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.14.0
+
+- Bump exarrow-rs to 0.33.1, with `arrow`, `arrow-csv`, `arrow-json`, and `parquet` moving to 60; Cargo builds enable the new opt-in exarrow-rs `parquet` feature
+- **Breaking.** On the native transport, a `TIMESTAMP WITH LOCAL TIME ZONE` column now has the Arrow type `Timestamp(Microsecond, "UTC")` and returns UTC instants. In a session whose time zone is not `UTC`, values differ from earlier releases and from the WebSocket transport
+
 ## 0.13.1
 
 - **Security.** Stop trusting the eight eMudhra intermediate CA certificates whose private keys were found to be recoverable (CVE-2026-111943). Bump `rustls-webpki` to 0.103.16, which rejects these intermediates during path building, and `webpki-roots` to 1.0.11, which drops `emSign ECC Root CA - G3` from the root store compiled into exapump for BucketFS HTTPS. Exasol SQL connections use the OS trust store, so keep the host's `ca-certificates` package up to date as well
