@@ -11,7 +11,7 @@ name = "exapump"
 path = "src/main.rs"
 
 [dependencies]
-exarrow-rs = { version = "0.32.0", features = ["native", "websocket", "parquet"] }
+exarrow-rs = { version = "0.33.1", features = ["native", "websocket", "parquet"] }
 clap = { version = "4", features = ["derive", "env"] }
 tokio = { version = "1", features = ["full"] }
 anyhow = "1"
