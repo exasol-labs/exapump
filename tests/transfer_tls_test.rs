@@ -308,3 +308,43 @@ async fn export_split_parquet_uses_tls_for_the_data_transfer() {
     )
     .await;
 }
+
+/// Scenario: Export uses TLS for the data transfer when the connection uses TLS
+#[tokio::test]
+async fn export_split_parquet_of_an_empty_result_uses_tls_for_the_data_transfer() {
+    fixtures::require_exasol!();
+    let (mut conn, schema) = fixtures::setup_exasol_schema("EXAPUMP_TLS_EX_PQEMPTY").await;
+    conn.execute_update(&format!(
+        "CREATE TABLE {schema}.SRC (\"id\" DECIMAL(18,0), \"note\" VARCHAR(200))"
+    ))
+    .await
+    .unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let output = dir.path().join("out.parquet");
+    let relay = RecordingRelay::start();
+
+    // An empty split export writes its single file through a second, fallback transfer.
+    fixtures::exapump()
+        .timeout(std::time::Duration::from_secs(60))
+        .args(["export", "--table", &format!("{schema}.SRC")])
+        .args(["--format", "parquet", "--output", output.to_str().unwrap()])
+        .args(["--max-rows-per-file", "20"])
+        .args(["--dsn", &relay.dsn()])
+        .assert()
+        .success();
+
+    // With no rows to look for, a plain HTTP exchange on any connection shows a tunnel without TLS.
+    assert!(
+        relay.connection_count() >= 2,
+        "expected the login and the transfer tunnel to pass the relay, saw {} connection(s)",
+        relay.connection_count()
+    );
+    assert!(
+        !relay.any_connection_contains(b"HTTP/1.1"),
+        "the transfer did not use TLS: an HTTP exchange appeared on the wire as plain text"
+    );
+    assert_eq!(exported_marker_rows(dir.path(), "TLSMARKER"), 0);
+    let _ = conn
+        .execute_update(&format!("DROP SCHEMA {schema} CASCADE"))
+        .await;
+}
