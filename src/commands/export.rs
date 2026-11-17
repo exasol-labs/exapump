@@ -155,6 +155,7 @@ async fn export_csv(
     base_path: &Path,
     limits: SplitLimits,
 ) -> anyhow::Result<()> {
+    let options = options.use_tls(conn.params().use_tls);
     let with_header = options.with_column_names;
 
     if limits.is_split() {
@@ -276,7 +277,9 @@ async fn export_parquet_split(
         .map(|m| Arc::clone(&m.schema))
         .ok_or_else(|| anyhow::anyhow!("could not determine schema for split export"))?;
 
-    let mut arrow_opts = ArrowExportOptions::new().with_schema(arrow_schema);
+    let mut arrow_opts = ArrowExportOptions::new()
+        .with_schema(arrow_schema)
+        .use_tls(conn.params().use_tls);
     if let Some(mr) = target.limits.max_rows {
         arrow_opts = arrow_opts.with_batch_size(mr as usize);
     }
@@ -285,8 +288,9 @@ async fn export_parquet_split(
 
     if batches.is_empty() {
         eprintln!("Exported 0 rows to 1 file(s)");
-        let options =
-            ParquetExportOptions::new().with_compression(map_compression(target.compression));
+        let options = ParquetExportOptions::new()
+            .with_compression(map_compression(target.compression))
+            .use_tls(conn.params().use_tls);
         conn.export_to_parquet(
             ExportSource::Query {
                 sql: "SELECT 1 WHERE FALSE".to_string(),
@@ -318,8 +322,9 @@ async fn export_parquet(
     if target.limits.is_split() {
         export_parquet_split(conn, source, target).await
     } else {
-        let options =
-            ParquetExportOptions::new().with_compression(map_compression(target.compression));
+        let options = ParquetExportOptions::new()
+            .with_compression(map_compression(target.compression))
+            .use_tls(conn.params().use_tls);
         let rows = conn
             .export_to_parquet(source, target.base_path, options)
             .await?;
