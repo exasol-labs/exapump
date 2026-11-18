@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.14.1
+
+- Bump exarrow-rs to 0.34.1. A connection with a pinned certificate fingerprint now also checks that the server signs the TLS handshake with the pinned certificate's private key
+
 ## 0.14.0
 
 - Bump exarrow-rs to 0.33.1, with `arrow`, `arrow-csv`, `arrow-json`, and `parquet` moving to 60; Cargo builds enable the new opt-in exarrow-rs `parquet` feature
