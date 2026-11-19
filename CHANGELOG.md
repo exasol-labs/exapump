@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.14.2
+
+- Bump exarrow-rs to 0.34.2 (package metadata only, no behavior change)
+
 ## 0.14.1
 
 - Bump exarrow-rs to 0.34.1. A connection with a pinned certificate fingerprint now also checks that the server signs the TLS handshake with the pinned certificate's private key
