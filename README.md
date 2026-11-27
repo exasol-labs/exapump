@@ -1,6 +1,6 @@
 <div align="center">
 
-![exapump logo](assets/exapump-logo.svg)
+<img src="assets/logo.svg" alt="exapump logo" width="160">
 
 # exapump
 
