@@ -3,6 +3,7 @@
 ## 0.14.2
 
 - Bump exarrow-rs to 0.34.2 (package metadata only, no behavior change)
+- Update `url` to 2.5.9 (RUSTSEC-2026-0592) and `parquet` and `arrow` to 60.2.0 (RUSTSEC-2026-0595) in the lockfile
 
 ## 0.14.1
 

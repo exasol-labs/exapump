@@ -1,3 +1,8 @@
+[advisories]
+ignore = [
+    { id = "RUSTSEC-2026-0543", reason = "chrono unmaintained, no fixed version; required by arrow and exarrow-rs" },
+]
+
 [licenses]
 allow = [
     "MIT",
